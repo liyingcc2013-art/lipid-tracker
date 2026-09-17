@@ -16,7 +16,11 @@ import {
   Sparkles,
   ArrowUpRight,
   ShieldCheck,
-  Plus
+  Plus,
+  Loader2,
+  Code2,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface UploadedFile {
@@ -30,7 +34,11 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [file, setFile] = useState<UploadedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploaded'>('idle');
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [extractedText, setExtractedText] = useState<string | null>(null);
+  const [numPages, setNumPages] = useState<number | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -45,8 +53,11 @@ export default function Home() {
     setIsDragging(false);
   };
 
-  const validateAndSetFile = (selectedFile: File) => {
+  const processPdfFile = async (selectedFile: File) => {
     setError(null);
+    setExtractedText(null);
+    setNumPages(null);
+
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
       setError('Please upload a valid PDF document containing your lab report.');
       return;
@@ -58,7 +69,33 @@ export default function Home() {
       type: selectedFile.type,
       lastModified: selectedFile.lastModified,
     });
-    setUploadStatus('uploaded');
+
+    setIsProcessing(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      const response = await fetch('/api/parse-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to process PDF file.');
+      }
+
+      setExtractedText(data.text);
+      setNumPages(data.numpages);
+    } catch (err: unknown) {
+      console.error('PDF parsing error:', err);
+      const msg = err instanceof Error ? err.message : 'An error occurred while parsing the PDF.';
+      setError(msg);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -68,23 +105,32 @@ export default function Home() {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
-      validateAndSetFile(droppedFile);
+      processPdfFile(droppedFile);
     }
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
-      validateAndSetFile(selectedFile);
+      processPdfFile(selectedFile);
     }
   };
 
   const removeFile = () => {
     setFile(null);
-    setUploadStatus('idle');
+    setExtractedText(null);
+    setNumPages(null);
     setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const copyToClipboard = () => {
+    if (extractedText) {
+      navigator.clipboard.writeText(extractedText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -95,7 +141,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
       {/* Header Navigation */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -133,7 +179,7 @@ export default function Home() {
         </section>
 
         {/* Upload Area */}
-        <section className="max-w-2xl mx-auto">
+        <section className="max-w-2xl mx-auto space-y-4">
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -173,7 +219,7 @@ export default function Home() {
                 <div className="pt-2">
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    Automated data extraction ready
+                    Automated pdf-parse text extraction
                   </span>
                 </div>
               </div>
@@ -188,12 +234,18 @@ export default function Home() {
                       <p className="text-sm font-semibold text-slate-900 truncate max-w-[220px] sm:max-w-xs">
                         {file.name}
                       </p>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                        <CheckCircle2 className="w-3 h-3" /> Ready
-                      </span>
+                      {isProcessing ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                          <Loader2 className="w-3 h-3 animate-spin" /> Parsing...
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                          <CheckCircle2 className="w-3 h-3" /> Extracted
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {formatFileSize(file.size)} • PDF Report
+                      {formatFileSize(file.size)} • {numPages ? `${numPages} page(s) • ` : ''}PDF Report
                     </p>
                   </div>
                 </div>
@@ -210,9 +262,43 @@ export default function Home() {
           </div>
 
           {error && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-3 rounded-lg">
+            <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-3 rounded-lg">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
+            </div>
+          )}
+
+          {/* Extracted Raw Text Display for Testing */}
+          {extractedText !== null && (
+            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg space-y-0 text-slate-100">
+              <div className="bg-slate-800/80 px-4 py-3 flex items-center justify-between border-b border-slate-700">
+                <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
+                  <Code2 className="w-4 h-4" />
+                  <span>Extracted PDF Raw Text (pdf-parse Output)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={copyToClipboard}
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2.5 py-1 rounded transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Text</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="p-4 max-h-64 overflow-y-auto font-mono text-xs text-slate-300 leading-relaxed whitespace-pre-wrap selection:bg-teal-700 selection:text-white">
+                {extractedText.trim().length > 0
+                  ? extractedText
+                  : '[No text content found in PDF document]'}
+              </div>
             </div>
           )}
         </section>
@@ -328,12 +414,14 @@ export default function Home() {
                     <FileSearch className="w-6 h-6" />
                   </div>
                   <p className="text-sm font-semibold text-slate-700">
-                    {uploadStatus === 'uploaded' ? 'Processing Lab PDF Data...' : 'Chart Visualization Area'}
+                    {extractedText !== null
+                      ? 'PDF Text Parsed Successfully!'
+                      : 'Chart Visualization Area'}
                   </p>
                   <p className="text-xs text-slate-500 max-w-sm">
-                    {uploadStatus === 'uploaded'
-                      ? `File "${file?.name}" uploaded. Interactive multi-line chart visualization will render here.`
-                      : 'Upload a PDF lab report above to populate interactive lipid trend charts and historic comparisons.'}
+                    {extractedText !== null
+                      ? `File "${file?.name}" parsed via /api/parse-pdf (${extractedText.length} characters extracted).`
+                      : 'Upload a PDF lab report above to extract raw text and populate interactive lipid trend charts.'}
                   </p>
                 </div>
               </div>
