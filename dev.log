@@ -5,23 +5,12 @@
 ▲ Next.js 16.3.5 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
-✓ Ready in 576ms
-✓ Running next.config.ts took 51ms
+✓ Ready in 547ms
+✓ Running next.config.ts took 45ms
 
- GET / 200 in 2.9s (next.js: 2.7s, application-code: 249ms)
- GET / 200 in 782ms (next.js: 342ms, application-code: 440ms)
+ HEAD / 200 in 3.3s (next.js: 3.0s, application-code: 239ms)
+ GET / 200 in 94ms (next.js: 12ms, application-code: 83ms)
 ○ Compiling /api/parse-pdf ...
-Error parsing PDF: TypeError: Failed to parse body as FormData.
-    at POST (app/api/parse-pdf/route.ts:7:32)
-   5 | export async function POST(req: NextRequest) {
-   6 |   try {
->  7 |     const formData = await req.formData();
-     |                                ^
-   8 |     const file = formData.get('file');
-   9 |
-  10 |     if (!file || !(file instanceof File)) {
- GET / 200 in 75ms (next.js: 9ms, application-code: 65ms)
-Warning: Indexing all PDF objects
 Error parsing PDF: UnknownErrorException: bad XRef entry
     at POST (app/api/parse-pdf/route.ts:27:38)
   25 |     const buffer = Buffer.from(arrayBuffer);
@@ -33,43 +22,10 @@ Error parsing PDF: UnknownErrorException: bad XRef entry
   30 |       success: true, {
   details: 'FormatError: bad XRef entry'
 }
-(node:24541) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+(node:55656) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
 (Use `node --trace-deprecation ...` to show where the warning was created)
- POST /api/parse-pdf 500 in 497ms (next.js: 6ms, application-code: 491ms)
-[browser] PDF parsing error: Error: bad XRef entry
-    at processPdfFile (app/page.tsx:87:15)
-  85 |
-  86 |       if (!response.ok) {
-> 87 |         throw new Error(data.error || 'Failed to process PDF file.');
-     |               ^
-  88 |       }
-  89 |
-  90 |       setExtractedText(data.text); (app/page.tsx:93:15)
-Warning: Indexing all PDF objects
-Error parsing PDF: UnknownErrorException: bad XRef entry
-    at POST (app/api/parse-pdf/route.ts:27:38)
-  25 |     const buffer = Buffer.from(arrayBuffer);
-  26 |
-> 27 |     const parsedData = await pdfParse(buffer);
-     |                                      ^
-  28 |
-  29 |     return NextResponse.json({
-  30 |       success: true, {
-  details: 'FormatError: bad XRef entry'
-}
- POST /api/parse-pdf 500 in 20ms (next.js: 4ms, application-code: 16ms)
-Error parsing PDF: UnknownErrorException: bad XRef entry
-    at POST (app/api/parse-pdf/route.ts:27:38)
-  25 |     const buffer = Buffer.from(arrayBuffer);
-  26 |
-> 27 |     const parsedData = await pdfParse(buffer);
-     |                                      ^
-  28 |
-  29 |     return NextResponse.json({
-  30 |       success: true, {
-  details: 'FormatError: bad XRef entry'
-}
- POST /api/parse-pdf 500 in 19ms (next.js: 6ms, application-code: 14ms)
- POST /api/parse-pdf 200 in 60ms (next.js: 4ms, application-code: 56ms)
- GET / 200 in 63ms (next.js: 5ms, application-code: 58ms)
- POST /api/parse-pdf 200 in 22ms (next.js: 4ms, application-code: 17ms)
+ POST /api/parse-pdf 500 in 4.8s (next.js: 4.1s, application-code: 719ms)
+ GET / 200 in 84ms (next.js: 12ms, application-code: 72ms)
+ POST /api/parse-pdf 200 in 66ms (next.js: 7ms, application-code: 59ms)
+GEMINI_API_KEY not found in environment. Using rule-based fallback extraction.
+ POST /api/extract-lipid-data 200 in 319ms (next.js: 300ms, application-code: 19ms)
