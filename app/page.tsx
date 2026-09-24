@@ -20,7 +20,8 @@ import {
   Loader2,
   Code2,
   Copy,
-  Check
+  Check,
+  Cpu
 } from 'lucide-react';
 
 interface UploadedFile {
@@ -30,13 +31,50 @@ interface UploadedFile {
   lastModified: number;
 }
 
+interface LipidMetrics {
+  test_date: string;
+  ldl: number;
+  hdl: number;
+  triglycerides: number;
+  total_cholesterol: number;
+  unit: string;
+}
+
+function getStatusBadge(type: 'total' | 'ldl' | 'hdl' | 'triglycerides', value: number) {
+  if (type === 'total') {
+    if (value < 200) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+    if (value <= 239) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+  }
+  if (type === 'ldl') {
+    if (value < 100) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+    if (value <= 129) return { label: 'Near Optimal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
+    if (value <= 159) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+  }
+  if (type === 'hdl') {
+    if (value >= 60) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+    if (value >= 40) return { label: 'Normal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
+    return { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+  }
+  if (type === 'triglycerides') {
+    if (value < 150) return { label: 'Normal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+    if (value <= 199) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+  }
+  return { label: 'Normal', color: 'bg-slate-50 text-slate-700 border-slate-200' };
+}
+
 export default function Home() {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [file, setFile] = useState<UploadedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [lipidData, setLipidData] = useState<LipidMetrics | null>(null);
+  const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,6 +95,8 @@ export default function Home() {
     setError(null);
     setExtractedText(null);
     setNumPages(null);
+    setLipidData(null);
+    setExtractionMethod(null);
 
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
       setError('Please upload a valid PDF document containing your lab report.');
@@ -89,6 +129,39 @@ export default function Home() {
 
       setExtractedText(data.text);
       setNumPages(data.numpages);
+
+      // Trigger AI Extraction of structured lipid metrics
+      setIsExtracting(true);
+      try {
+        const extractRes = await fetch('/api/extract-lipid-data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: data.text }),
+        });
+
+        const extractJson = await extractRes.json();
+
+        if (!extractRes.ok) {
+          throw new Error(extractJson.error || 'Failed to extract lipid data.');
+        }
+
+        setLipidData({
+          test_date: extractJson.test_date,
+          ldl: extractJson.ldl,
+          hdl: extractJson.hdl,
+          triglycerides: extractJson.triglycerides,
+          total_cholesterol: extractJson.total_cholesterol,
+          unit: extractJson.unit,
+        });
+        setExtractionMethod(extractJson.extracted_by || 'gemini');
+      } catch (extractErr) {
+        console.error('Lipid data extraction error:', extractErr);
+        const extractMsg =
+          extractErr instanceof Error ? extractErr.message : 'AI lipid metric extraction failed.';
+        setError(`PDF parsed, but AI extraction error occurred: ${extractMsg}`);
+      } finally {
+        setIsExtracting(false);
+      }
     } catch (err: unknown) {
       console.error('PDF parsing error:', err);
       const msg = err instanceof Error ? err.message : 'An error occurred while parsing the PDF.';
@@ -120,6 +193,8 @@ export default function Home() {
     setFile(null);
     setExtractedText(null);
     setNumPages(null);
+    setLipidData(null);
+    setExtractionMethod(null);
     setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -139,6 +214,44 @@ export default function Home() {
     else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
     else return (bytes / 1048576).toFixed(1) + ' MB';
   };
+
+  const activeTotal = lipidData ? lipidData.total_cholesterol : 198;
+  const activeLdl = lipidData ? lipidData.ldl : 115;
+  const activeHdl = lipidData ? lipidData.hdl : 58;
+  const activeTriglycerides = lipidData ? lipidData.triglycerides : 125;
+  const activeUnit = lipidData ? lipidData.unit : 'mg/dL';
+  const activeTestDate = lipidData ? lipidData.test_date : null;
+
+  const metricCards = [
+    {
+      title: 'Total Cholesterol',
+      value: `${activeTotal} ${activeUnit}`,
+      statusInfo: getStatusBadge('total', activeTotal),
+      change: lipidData ? 'Extracted from PDF' : '-12 mg/dL from last report',
+      trend: 'down',
+    },
+    {
+      title: 'LDL (Bad)',
+      value: `${activeLdl} ${activeUnit}`,
+      statusInfo: getStatusBadge('ldl', activeLdl),
+      change: lipidData ? 'Extracted from PDF' : '-8 mg/dL from last report',
+      trend: 'down',
+    },
+    {
+      title: 'HDL (Good)',
+      value: `${activeHdl} ${activeUnit}`,
+      statusInfo: getStatusBadge('hdl', activeHdl),
+      change: lipidData ? 'Extracted from PDF' : '+4 mg/dL from last report',
+      trend: 'up',
+    },
+    {
+      title: 'Triglycerides',
+      value: `${activeTriglycerides} ${activeUnit}`,
+      statusInfo: getStatusBadge('triglycerides', activeTriglycerides),
+      change: lipidData ? 'Extracted from PDF' : '-15 mg/dL from last report',
+      trend: 'down',
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
@@ -174,7 +287,7 @@ export default function Home() {
             Monitor Your Cardiovascular Health Trends
           </h2>
           <p className="text-slate-600 text-base sm:text-lg leading-relaxed">
-            Upload your blood test lab reports to parse lipid panel metrics, track changes over time, and visualize your health trajectory.
+            Upload your blood test lab reports to parse lipid panel metrics with Gemini AI, track changes over time, and visualize your health trajectory.
           </p>
         </section>
 
@@ -219,7 +332,7 @@ export default function Home() {
                 <div className="pt-2">
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    Automated pdf-parse text extraction
+                    Automated PDF parsing & Gemini AI extraction
                   </span>
                 </div>
               </div>
@@ -236,7 +349,11 @@ export default function Home() {
                       </p>
                       {isProcessing ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                          <Loader2 className="w-3 h-3 animate-spin" /> Parsing...
+                          <Loader2 className="w-3 h-3 animate-spin" /> Parsing PDF...
+                        </span>
+                      ) : isExtracting ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-100 text-teal-800">
+                          <Loader2 className="w-3 h-3 animate-spin" /> AI Extracting...
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
@@ -268,13 +385,13 @@ export default function Home() {
             </div>
           )}
 
-          {/* Extracted Raw Text Display for Testing */}
+          {/* Extracted Raw Text Display */}
           {extractedText !== null && (
             <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg space-y-0 text-slate-100">
               <div className="bg-slate-800/80 px-4 py-3 flex items-center justify-between border-b border-slate-700">
                 <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
                   <Code2 className="w-4 h-4" />
-                  <span>Extracted PDF Raw Text (pdf-parse Output)</span>
+                  <span>Extracted PDF Raw Text</span>
                 </div>
                 <button
                   type="button"
@@ -303,84 +420,89 @@ export default function Home() {
           )}
         </section>
 
-        {/* Dashboard Placeholder Section */}
+        {/* Dashboard Section */}
         <section className="space-y-6 pt-4 border-t border-slate-200/80">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-teal-600" />
-                Lipid Dashboard
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <BarChart3 className="w-5 h-5 text-teal-600" />
+                  Lipid Dashboard
+                </h3>
+                {lipidData && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
+                    <Cpu className="w-3 h-3" />
+                    AI Extracted ({extractionMethod === 'gemini' ? 'Gemini API' : 'Structured Parser'})
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500">
-                Visual trend analysis and health metrics overview
+                {lipidData
+                  ? `Displaying extracted metrics for lab test on ${lipidData.test_date}`
+                  : 'Visual trend analysis and health metrics overview'}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                Last 12 Months
+                {activeTestDate ? `Test Date: ${activeTestDate}` : 'Last 12 Months'}
               </span>
             </div>
           </div>
 
-          {/* Metric Summary Cards Placeholder */}
+          {/* Metric Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[
-              {
-                title: 'Total Cholesterol',
-                value: '198 mg/dL',
-                status: 'Optimal',
-                statusColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                change: '-12 mg/dL from last report',
-                trend: 'down',
-              },
-              {
-                title: 'LDL (Bad)',
-                value: '115 mg/dL',
-                status: 'Borderline',
-                statusColor: 'bg-amber-50 text-amber-700 border-amber-200',
-                change: '-8 mg/dL from last report',
-                trend: 'down',
-              },
-              {
-                title: 'HDL (Good)',
-                value: '58 mg/dL',
-                status: 'Optimal',
-                statusColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                change: '+4 mg/dL from last report',
-                trend: 'up',
-              },
-              {
-                title: 'Triglycerides',
-                value: '125 mg/dL',
-                status: 'Normal',
-                statusColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                change: '-15 mg/dL from last report',
-                trend: 'down',
-              },
-            ].map((metric, idx) => (
+            {metricCards.map((metric, idx) => (
               <div
                 key={idx}
-                className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-2xs space-y-3 hover:shadow-md transition-shadow"
+                className={`p-5 rounded-2xl border transition-all ${
+                  lipidData
+                    ? 'bg-white border-teal-200 shadow-sm ring-1 ring-teal-500/10'
+                    : 'bg-white border-slate-200/80 shadow-2xs hover:shadow-md'
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-medium text-slate-500">{metric.title}</p>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${metric.statusColor}`}>
-                    {metric.status}
+                  <span
+                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${metric.statusInfo.color}`}
+                  >
+                    {metric.statusInfo.label}
                   </span>
                 </div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-2xl font-bold text-slate-900 tracking-tight">
-                    {metric.value}
-                  </span>
+                <div className="flex items-baseline justify-between mt-2">
+                  {isExtracting ? (
+                    <div className="h-8 w-24 bg-slate-200 animate-pulse rounded" />
+                  ) : (
+                    <span className="text-2xl font-bold text-slate-900 tracking-tight">
+                      {metric.value}
+                    </span>
+                  )}
                 </div>
-                <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-2">
                   <TrendingUp className="w-3 h-3 text-teal-600" />
                   {metric.change}
                 </p>
               </div>
             ))}
           </div>
+
+          {/* JSON Structured Output View when Lipid Data is Extracted */}
+          {lipidData && (
+            <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 shadow-md space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Structured Lipid JSON Output</span>
+                </div>
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
+                  JSON Schema Validated
+                </span>
+              </div>
+              <pre className="font-mono text-xs text-teal-300 bg-slate-950 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
+                {JSON.stringify(lipidData, null, 2)}
+              </pre>
+            </div>
+          )}
 
           {/* Visualization Placeholders */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -415,12 +537,12 @@ export default function Home() {
                   </div>
                   <p className="text-sm font-semibold text-slate-700">
                     {extractedText !== null
-                      ? 'PDF Text Parsed Successfully!'
+                      ? 'PDF Raw Text & AI Metrics Processed'
                       : 'Chart Visualization Area'}
                   </p>
                   <p className="text-xs text-slate-500 max-w-sm">
-                    {extractedText !== null
-                      ? `File "${file?.name}" parsed via /api/parse-pdf (${extractedText.length} characters extracted).`
+                    {lipidData
+                      ? `Successfully extracted test metrics from report dated ${lipidData.test_date}. Total Cholesterol: ${lipidData.total_cholesterol} ${lipidData.unit}.`
                       : 'Upload a PDF lab report above to extract raw text and populate interactive lipid trend charts.'}
                   </p>
                 </div>
@@ -439,11 +561,17 @@ export default function Home() {
                 <div className="space-y-3 text-xs text-slate-600">
                   <div className="p-3 bg-teal-50/50 rounded-xl border border-teal-100 space-y-1">
                     <p className="font-semibold text-teal-900">HDL/LDL Ratio</p>
-                    <p className="text-slate-600">Your ratio is in a healthy range. Continued aerobic exercise will help maintain elevated HDL levels.</p>
+                    <p className="text-slate-600">
+                      HDL is {activeHdl} {activeUnit} and LDL is {activeLdl} {activeUnit}. Continued aerobic exercise will help maintain elevated HDL levels.
+                    </p>
                   </div>
                   <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-100 space-y-1">
                     <p className="font-semibold text-amber-900">LDL Target Threshold</p>
-                    <p className="text-slate-600">Slightly above the optimal 100 mg/dL target. Consider reviewing dietary saturated fat intake.</p>
+                    <p className="text-slate-600">
+                      {activeLdl > 100
+                        ? `Your LDL level is ${activeLdl} ${activeUnit}, slightly above the optimal 100 ${activeUnit} target.`
+                        : `Your LDL level is ${activeLdl} ${activeUnit}, which meets the optimal target threshold.`}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -452,7 +580,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-2xs"
+                  className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
                 >
                   <Plus className="w-4 h-4" /> Add Another Lab Report
                 </button>
