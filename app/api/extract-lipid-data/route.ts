@@ -161,7 +161,11 @@ export async function POST(req: NextRequest) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-1.5-flash',
         systemInstruction:
-          'You are a strict medical data parser. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it. The raw text contains English test names immediately followed by Chinese characters (e.g., \'LDL Chol (Direct) 低脂蛋白(坏)胆固醇 1.74 mmol/L\'). You must ignore the Chinese characters and extract the first numeric value and its corresponding unit.',
+          'You are a strict medical data parser with spatial reasoning for handling disjointed and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it.\n\n' +
+          'CRITICAL PARSING & SPATIAL REASONING RULES:\n' +
+          '1. PATIENT NAME: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings." or disclaimers.\n' +
+          '2. TEST DATE: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.\n' +
+          '3. TEST RESULTS: Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters. You MUST find the English test name, scan forward past any Chinese characters, newlines, or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.',
         generationConfig: {
           temperature: 0,
           responseMimeType: 'application/json',
@@ -170,7 +174,7 @@ export async function POST(req: NextRequest) {
             properties: {
               patient_name: {
                 type: SchemaType.STRING,
-                description: 'Patient full name, e.g., LEE KIM NEO ALICE',
+                description: 'Patient full name in ALL CAPS usually found near top near I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings."',
               },
               patient_ic: {
                 type: SchemaType.STRING,
@@ -178,21 +182,21 @@ export async function POST(req: NextRequest) {
               },
               test_date: {
                 type: SchemaType.STRING,
-                description: 'Date of test in YYYY-MM-DD format, e.g., 2026-09-26',
+                description: 'Date following keywords like "Collected:" or "Reported:" formatted as YYYY-MM-DD',
               },
               categories: {
                 type: SchemaType.ARRAY,
-                description: 'List of test categories/panels extracted from the lab report',
+                description: 'List of test categories/panels actively searched (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
                 items: {
                   type: SchemaType.OBJECT,
                   properties: {
                     category: {
                       type: SchemaType.STRING,
-                      description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE',
+                      description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE',
                     },
                     tests: {
                       type: SchemaType.ARRAY,
-                      description: 'List of test items under this category',
+                      description: 'List of test items under this category using scan-forward method',
                       items: {
                         type: SchemaType.OBJECT,
                         properties: {
@@ -202,11 +206,11 @@ export async function POST(req: NextRequest) {
                           },
                           value: {
                             type: SchemaType.NUMBER,
-                            description: 'Extracted numeric test value from primary result column',
+                            description: 'VERY FIRST numeric value encountered when scanning forward past Chinese characters or blank spaces',
                           },
                           unit: {
                             type: SchemaType.STRING,
-                            description: 'Unit of measurement associated with the numeric value, e.g., mmol/L, U/L',
+                            description: 'Unit of measurement associated with the numeric value, e.g., mmol/L, U/L, g/L, %',
                           },
                           ref_range: {
                             type: SchemaType.STRING,
@@ -228,27 +232,28 @@ export async function POST(req: NextRequest) {
 
       const prompt = `Analyze the following blood test lab report text and extract complete multi-panel test metrics along with patient metadata.
 
-INSTRUCTIONS & RULES:
+INSTRUCTIONS & RULES FOR DISJOINTED 1D SCRAMBLED TEXT:
 1. Patient Metadata:
-   - Extract patient_name (string).
+   - Extract patient_name: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "'s clinical findings."
    - Extract patient_ic (string).
-   - Extract test_date in YYYY-MM-DD format.
+   - Extract test_date: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.
 
-2. Dual-Unit & Chinese Character Rules:
-   - The raw text contains English test names immediately followed by Chinese characters (e.g., 'LDL Chol (Direct) 低脂蛋白(坏)胆固醇 1.74 mmol/L').
-   - You MUST ignore Chinese characters and extract test names in English only.
-   - Extract the first numeric value and its corresponding unit.
+2. Multi-Panel & Spatial Reasoning Extraction Rules:
+   - Actively search for all panels present in the report, including LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE, and any other panels.
+   - Extract all associated tests within these panels using spatial reasoning for scrambled 1D text.
+   - Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters.
+   - You must find the English test name, scan forward past any Chinese characters or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.
    - You MUST NOT generate synthetic data, infer, or hallucinate missing tests.
    - Extract ONLY tests explicitly present in the text.
 
 3. Dynamic Test Categories:
-   - Group all extracted tests into their respective panel categories as stated in the text.
+   - Group all extracted tests into their respective panel categories (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).
    - Return an array of categories, each containing:
      - category: Name of the test panel/category
      - tests: Array of test items under that category.
        Each test item must have:
-       - name: string (English only)
-       - value: number
+       - name: string (English name only)
+       - value: number (VERY FIRST numeric value encountered after scanning forward)
        - unit: string
        - ref_range: string
 
