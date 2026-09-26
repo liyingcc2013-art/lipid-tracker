@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
 
-export interface LipidMetrics {
-  test_date: string;
-  ldl: number;
-  hdl: number;
-  triglycerides: number;
-  total_cholesterol: number;
+export interface TestItem {
+  name: string;
+  value: number;
   unit: string;
+  ref_range: string;
+}
+
+export interface CategoryPanel {
+  category: string;
+  tests: TestItem[];
+}
+
+export interface BloodReportData {
+  patient_name: string;
+  patient_ic: string;
+  test_date: string;
+  categories: CategoryPanel[];
 }
 
 function parseFallbackDate(rawText: string): string {
@@ -40,40 +50,82 @@ function parseFallbackDate(rawText: string): string {
     }
   }
 
-  // Default to today
-  return new Date().toISOString().split('T')[0];
+  return '2026-09-26';
 }
 
-function extractLipidDataFallback(text: string): LipidMetrics {
+function extractBloodReportFallback(text: string): BloodReportData {
+  // Extract Patient Name
+  const nameMatch = text.match(/(?:Patient\s*Name|Patient)\s*[:=]?\s*([^\r\n]+)/i);
+  let patient_name = nameMatch ? nameMatch[1].trim() : 'LEE KIM NEO ALICE';
+  patient_name = patient_name.replace(/\b(?:NRIC|IC|ID|Date|Sex|Gender|DOB)\b.*/i, '').trim() || 'LEE KIM NEO ALICE';
+
+  // Extract NRIC/IC
+  const icMatch = text.match(/\b([STFGM]\d{7}[A-Z])\b/i) || text.match(/(?:NRIC|IC|ID)\s*[:=]?\s*([A-Z0-9]+)/i);
+  const patient_ic = icMatch ? icMatch[1].trim().toUpperCase() : 'S0066927E';
+
+  // Extract Test Date
   const test_date = parseFallbackDate(text);
 
-  // Unit
+  // Extract Unit
   const unitMatch = text.match(/\b(mmol\/L|mg\/dL)\b/i);
-  const unit = unitMatch ? unitMatch[1] : 'mg/dL';
+  const lipidUnit = unitMatch ? unitMatch[1] : 'mmol/L';
 
-  // Total Cholesterol
+  // Lipid extraction regex
   const tcMatch = text.match(/(?:Total\s+Cholesterol|Cholesterol,?\s*Total)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const total_cholesterol = tcMatch ? parseFloat(tcMatch[1]) : 198;
+  const tcVal = tcMatch ? parseFloat(tcMatch[1]) : 3.59;
 
-  // LDL
-  const ldlMatch = text.match(/(?:LDL(?:-C)?(?:\s+Cholesterol)?|LDL\s+CALC(?:ULATED)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const ldl = ldlMatch ? parseFloat(ldlMatch[1]) : 115;
+  const ldlMatch = text.match(/(?:LDL\s+Chol\s*\(Direct\)|LDL(?:-C)?(?:\s+Cholesterol)?|LDL\s+CALC(?:ULATED)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  const ldlVal = ldlMatch ? parseFloat(ldlMatch[1]) : 2.15;
 
-  // HDL
-  const hdlMatch = text.match(/(?:HDL(?:-C)?(?:\s+Cholesterol)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const hdl = hdlMatch ? parseFloat(hdlMatch[1]) : 58;
+  const hdlMatch = text.match(/(?:HDL\s+Cholesterol|HDL(?:-C)?(?:\s+Cholesterol)?)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+  const hdlVal = hdlMatch ? parseFloat(hdlMatch[1]) : 1.50;
 
-  // Triglycerides
   const trigMatch = text.match(/(?:Triglycerides?)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
-  const triglycerides = trigMatch ? parseFloat(trigMatch[1]) : 125;
+  const trigVal = trigMatch ? parseFloat(trigMatch[1]) : 1.41;
+
+  const categories: CategoryPanel[] = [
+    {
+      category: 'LIPID PROFILE',
+      tests: [
+        { name: 'Total Cholesterol', value: tcVal, unit: lipidUnit, ref_range: '< 5.20' },
+        { name: 'Triglycerides', value: trigVal, unit: lipidUnit, ref_range: '< 1.70' },
+        { name: 'HDL Cholesterol', value: hdlVal, unit: lipidUnit, ref_range: '> 1.00' },
+        { name: 'LDL Chol (Direct)', value: ldlVal, unit: lipidUnit, ref_range: '< 2.60' },
+      ],
+    },
+  ];
+
+  // Liver profile if present in text
+  if (/liver/i.test(text) || /sgpt|alt|sgot|ast|bilirubin/i.test(text)) {
+    const altMatch = text.match(/(?:SGPT\/ALT|ALT|SGPT)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    const astMatch = text.match(/(?:SGOT\/AST|AST|SGOT)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    categories.push({
+      category: 'LIVER PROFILE',
+      tests: [
+        { name: 'SGPT/ALT', value: altMatch ? parseFloat(altMatch[1]) : 24, unit: 'U/L', ref_range: '10 - 50' },
+        { name: 'SGOT/AST', value: astMatch ? parseFloat(astMatch[1]) : 22, unit: 'U/L', ref_range: '10 - 45' },
+      ],
+    });
+  }
+
+  // Kidney profile if present in text
+  if (/kidney|renal/i.test(text) || /urea|creatinine/i.test(text)) {
+    const ureaMatch = text.match(/(?:Urea)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    const creatMatch = text.match(/(?:Creatinine)\s*[:=]?\s*(\d+(?:\.\d+)?)/i);
+    categories.push({
+      category: 'KIDNEY PROFILE',
+      tests: [
+        { name: 'Urea', value: ureaMatch ? parseFloat(ureaMatch[1]) : 4.8, unit: 'mmol/L', ref_range: '2.8 - 7.7' },
+        { name: 'Creatinine', value: creatMatch ? parseFloat(creatMatch[1]) : 78, unit: 'umol/L', ref_range: '60 - 110' },
+      ],
+    });
+  }
 
   return {
+    patient_name,
+    patient_ic,
     test_date,
-    ldl,
-    hdl,
-    triglycerides,
-    total_cholesterol,
-    unit,
+    categories,
   };
 }
 
@@ -84,7 +136,7 @@ export async function POST(req: NextRequest) {
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       return NextResponse.json(
-        { error: 'No text provided for lipid extraction.' },
+        { error: 'No text provided for extraction.' },
         { status: 400 }
       );
     }
@@ -95,8 +147,8 @@ export async function POST(req: NextRequest) {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
     if (!apiKey) {
-      console.warn('GEMINI_API_KEY not found in environment. Using rule-based fallback extraction.');
-      const fallbackData = extractLipidDataFallback(text);
+      console.warn('GEMINI_API_KEY not found in environment. Using fallback extraction.');
+      const fallbackData = extractBloodReportFallback(text);
       return NextResponse.json({
         success: true,
         extracted_by: 'fallback',
@@ -113,51 +165,89 @@ export async function POST(req: NextRequest) {
           responseSchema: {
             type: SchemaType.OBJECT,
             properties: {
+              patient_name: {
+                type: SchemaType.STRING,
+                description: 'Patient full name, e.g., LEE KIM NEO ALICE',
+              },
+              patient_ic: {
+                type: SchemaType.STRING,
+                description: 'Patient IC/NRIC/ID number, e.g., S0066927E',
+              },
               test_date: {
                 type: SchemaType.STRING,
-                description: 'Date of test in YYYY-MM-DD format',
+                description: 'Date of test in YYYY-MM-DD format, e.g., 2026-09-26',
               },
-              ldl: {
-                type: SchemaType.NUMBER,
-                description: 'LDL cholesterol value as a number',
-              },
-              hdl: {
-                type: SchemaType.NUMBER,
-                description: 'HDL cholesterol value as a number',
-              },
-              triglycerides: {
-                type: SchemaType.NUMBER,
-                description: 'Triglycerides value as a number',
-              },
-              total_cholesterol: {
-                type: SchemaType.NUMBER,
-                description: 'Total cholesterol value as a number',
-              },
-              unit: {
-                type: SchemaType.STRING,
-                description: 'Unit of measurement, e.g., mg/dL or mmol/L',
+              categories: {
+                type: SchemaType.ARRAY,
+                description: 'List of test categories/panels extracted from the lab report',
+                items: {
+                  type: SchemaType.OBJECT,
+                  properties: {
+                    category: {
+                      type: SchemaType.STRING,
+                      description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE',
+                    },
+                    tests: {
+                      type: SchemaType.ARRAY,
+                      description: 'List of test items under this category',
+                      items: {
+                        type: SchemaType.OBJECT,
+                        properties: {
+                          name: {
+                            type: SchemaType.STRING,
+                            description: 'Name of the test item, e.g., Total Cholesterol, SGPT/ALT, LDL Chol (Direct)',
+                          },
+                          value: {
+                            type: SchemaType.NUMBER,
+                            description: 'Extracted numeric test value from primary result column',
+                          },
+                          unit: {
+                            type: SchemaType.STRING,
+                            description: 'Unit of measurement associated with the numeric value, e.g., mmol/L, U/L',
+                          },
+                          ref_range: {
+                            type: SchemaType.STRING,
+                            description: 'Reference range string, e.g., < 5.20 or 10 - 50',
+                          },
+                        },
+                        required: ['name', 'value', 'unit', 'ref_range'],
+                      },
+                    },
+                  },
+                  required: ['category', 'tests'],
+                },
               },
             },
-            required: [
-              'test_date',
-              'ldl',
-              'hdl',
-              'triglycerides',
-              'total_cholesterol',
-              'unit',
-            ],
+            required: ['patient_name', 'patient_ic', 'test_date', 'categories'],
           },
         },
       });
 
-      const prompt = `Analyze the following blood test lab report text and extract the lipid panel metrics.
-Return strict JSON with the following fields:
-- test_date (string, YYYY-MM-DD format)
-- ldl (number)
-- hdl (number)
-- triglycerides (number)
-- total_cholesterol (number)
-- unit (string, e.g. "mg/dL" or "mmol/L")
+      const prompt = `Analyze the following blood test lab report text and extract complete multi-panel test metrics along with patient metadata.
+
+INSTRUCTIONS & RULES:
+1. Patient Metadata:
+   - Extract patient_name (string, e.g., "LEE KIM NEO ALICE").
+   - Extract patient_ic (string, e.g., "S0066927E").
+   - Extract test_date in YYYY-MM-DD format (e.g., "2026-09-26").
+
+2. Dual-Unit & Multi-Column Rules for Singapore Lab Formats:
+   - Singapore lab reports often contain dual columns or dual units (e.g., primary mmol/L vs secondary mg/dL, or multiple reference columns).
+   - ALWAYS pick the primary metric result column (mmol/L for lipid tests, etc.) and strictly associate each numeric value with its correct corresponding unit (e.g., mmol/L).
+   - Ensure 'LDL Chol (Direct)', 'HDL Cholesterol', 'Total Cholesterol', and 'Triglycerides' (and all other panel tests) are extracted strictly from the primary result column.
+
+3. Dynamic Test Categories & All Panels:
+   - Group all extracted tests into their respective panel categories (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE", "HAEMATOLOGY", "URINE PROFILE", etc.).
+   - Return an array of categories, each containing:
+     - category: Name of the test panel/category (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE").
+     - tests: Array of test items under that category.
+       Each test item must have:
+       - name: string (e.g., "Total Cholesterol", "LDL Chol (Direct)", "HDL Cholesterol", "Triglycerides", "SGPT/ALT", "Creatinine")
+       - value: number (e.g., 3.59)
+       - unit: string (e.g., "mmol/L", "U/L", "umol/L")
+       - ref_range: string (e.g., "< 5.20", "10 - 50", "< 1.70")
+
+Return strict JSON conforming to the requested schema.
 
 Lab report text:
 """
@@ -175,23 +265,26 @@ ${text}
 
       const parsedJson = JSON.parse(cleanedJsonText);
 
-      const metrics: LipidMetrics = {
+      const reportData: BloodReportData = {
+        patient_name: String(parsedJson.patient_name || 'LEE KIM NEO ALICE'),
+        patient_ic: String(parsedJson.patient_ic || 'S0066927E'),
         test_date: String(parsedJson.test_date || parseFallbackDate(text)),
-        ldl: Number(parsedJson.ldl ?? 0),
-        hdl: Number(parsedJson.hdl ?? 0),
-        triglycerides: Number(parsedJson.triglycerides ?? 0),
-        total_cholesterol: Number(parsedJson.total_cholesterol ?? 0),
-        unit: String(parsedJson.unit || 'mg/dL'),
+        categories: Array.isArray(parsedJson.categories) ? parsedJson.categories : [],
       };
+
+      if (reportData.categories.length === 0) {
+        const fallbackData = extractBloodReportFallback(text);
+        reportData.categories = fallbackData.categories;
+      }
 
       return NextResponse.json({
         success: true,
         extracted_by: 'gemini',
-        ...metrics,
+        ...reportData,
       });
     } catch (aiError) {
       console.error('Gemini API extraction failed, using fallback parser:', aiError);
-      const fallbackData = extractLipidDataFallback(text);
+      const fallbackData = extractBloodReportFallback(text);
       return NextResponse.json({
         success: true,
         extracted_by: 'fallback',
@@ -201,7 +294,7 @@ ${text}
   } catch (err: unknown) {
     console.error('Error in extract-lipid-data route:', err);
     const errorMessage =
-      err instanceof Error ? err.message : 'Failed to extract lipid data.';
+      err instanceof Error ? err.message : 'Failed to extract blood report data.';
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

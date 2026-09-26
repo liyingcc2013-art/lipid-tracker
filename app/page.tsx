@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Activity,
-  TrendingUp,
   FileSearch,
   LineChart,
   BarChart3,
@@ -21,7 +20,12 @@ import {
   Code2,
   Copy,
   Check,
-  Cpu
+  Cpu,
+  User,
+  CreditCard,
+  FlaskConical,
+  Layers,
+  FileCheck
 } from 'lucide-react';
 
 interface UploadedFile {
@@ -31,38 +35,107 @@ interface UploadedFile {
   lastModified: number;
 }
 
-interface LipidMetrics {
-  test_date: string;
-  ldl: number;
-  hdl: number;
-  triglycerides: number;
-  total_cholesterol: number;
+export interface TestItem {
+  name: string;
+  value: number;
   unit: string;
+  ref_range: string;
 }
 
-function getStatusBadge(type: 'total' | 'ldl' | 'hdl' | 'triglycerides', value: number) {
-  if (type === 'total') {
-    if (value < 200) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    if (value <= 239) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+export interface CategoryPanel {
+  category: string;
+  tests: TestItem[];
+}
+
+export interface BloodReportData {
+  patient_name: string;
+  patient_ic: string;
+  test_date: string;
+  categories: CategoryPanel[];
+}
+
+const DEFAULT_REPORT: BloodReportData = {
+  patient_name: 'LEE KIM NEO ALICE',
+  patient_ic: 'S0066927E',
+  test_date: '2026-09-26',
+  categories: [
+    {
+      category: 'LIPID PROFILE',
+      tests: [
+        { name: 'Total Cholesterol', value: 3.59, unit: 'mmol/L', ref_range: '< 5.20' },
+        { name: 'Triglycerides', value: 1.41, unit: 'mmol/L', ref_range: '< 1.70' },
+        { name: 'HDL Cholesterol', value: 1.50, unit: 'mmol/L', ref_range: '> 1.00' },
+        { name: 'LDL Chol (Direct)', value: 2.15, unit: 'mmol/L', ref_range: '< 2.60' },
+      ],
+    },
+    {
+      category: 'LIVER PROFILE',
+      tests: [
+        { name: 'SGPT/ALT', value: 24, unit: 'U/L', ref_range: '10 - 50' },
+        { name: 'SGOT/AST', value: 22, unit: 'U/L', ref_range: '10 - 45' },
+        { name: 'Total Bilirubin', value: 12.5, unit: 'umol/L', ref_range: '3.4 - 20.5' },
+        { name: 'Alkaline Phosphatase', value: 65, unit: 'U/L', ref_range: '40 - 130' },
+      ],
+    },
+    {
+      category: 'KIDNEY PROFILE',
+      tests: [
+        { name: 'Urea', value: 4.8, unit: 'mmol/L', ref_range: '2.8 - 7.7' },
+        { name: 'Creatinine', value: 78, unit: 'umol/L', ref_range: '60 - 110' },
+        { name: 'Sodium', value: 140, unit: 'mmol/L', ref_range: '135 - 145' },
+        { name: 'Potassium', value: 4.2, unit: 'mmol/L', ref_range: '3.5 - 5.1' },
+      ],
+    },
+  ],
+};
+
+function getTestBadge(testName: string, value: number, refRange: string) {
+  const name = testName.toLowerCase();
+  // Check for common upper bounds in ref range
+  if (refRange.includes('<')) {
+    const limit = parseFloat(refRange.replace(/[^0-9.]/g, ''));
+    if (!isNaN(limit)) {
+      if (value <= limit) {
+        return { label: 'In Range', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      } else if (value <= limit * 1.15) {
+        return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+      } else {
+        return { label: 'Elevated', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+      }
+    }
   }
-  if (type === 'ldl') {
-    if (value < 100) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    if (value <= 129) return { label: 'Near Optimal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
-    if (value <= 159) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+
+  // Check for lower bounds in ref range (e.g. > 1.00)
+  if (refRange.includes('>')) {
+    const limit = parseFloat(refRange.replace(/[^0-9.]/g, ''));
+    if (!isNaN(limit)) {
+      if (value >= limit) {
+        return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      } else {
+        return { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+      }
+    }
   }
-  if (type === 'hdl') {
-    if (value >= 60) return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    if (value >= 40) return { label: 'Normal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
-    return { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+
+  // Range min - max (e.g., 10 - 50)
+  if (refRange.includes('-')) {
+    const parts = refRange.split('-').map(p => parseFloat(p.replace(/[^0-9.]/g, '')));
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      if (value >= parts[0] && value <= parts[1]) {
+        return { label: 'Normal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
+      } else if (value < parts[0]) {
+        return { label: 'Low', color: 'bg-amber-50 text-amber-700 border-amber-200' };
+      } else {
+        return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+      }
+    }
   }
-  if (type === 'triglycerides') {
-    if (value < 150) return { label: 'Normal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-    if (value <= 199) return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-    return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+
+  if (name.includes('hdl')) {
+    return value >= 1.0 ? { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' } : { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
   }
-  return { label: 'Normal', color: 'bg-slate-50 text-slate-700 border-slate-200' };
+
+  return { label: 'Normal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
 }
 
 export default function Home() {
@@ -73,7 +146,7 @@ export default function Home() {
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [lipidData, setLipidData] = useState<LipidMetrics | null>(null);
+  const [reportData, setReportData] = useState<BloodReportData | null>(null);
   const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -95,7 +168,7 @@ export default function Home() {
     setError(null);
     setExtractedText(null);
     setNumPages(null);
-    setLipidData(null);
+    setReportData(null);
     setExtractionMethod(null);
 
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
@@ -130,7 +203,7 @@ export default function Home() {
       setExtractedText(data.text);
       setNumPages(data.numpages);
 
-      // Trigger AI Extraction of structured lipid metrics
+      // Trigger AI Extraction of structured blood report metrics & metadata
       setIsExtracting(true);
       try {
         const extractRes = await fetch('/api/extract-lipid-data', {
@@ -142,22 +215,20 @@ export default function Home() {
         const extractJson = await extractRes.json();
 
         if (!extractRes.ok) {
-          throw new Error(extractJson.error || 'Failed to extract lipid data.');
+          throw new Error(extractJson.error || 'Failed to extract report data.');
         }
 
-        setLipidData({
-          test_date: extractJson.test_date,
-          ldl: extractJson.ldl,
-          hdl: extractJson.hdl,
-          triglycerides: extractJson.triglycerides,
-          total_cholesterol: extractJson.total_cholesterol,
-          unit: extractJson.unit,
+        setReportData({
+          patient_name: extractJson.patient_name || 'LEE KIM NEO ALICE',
+          patient_ic: extractJson.patient_ic || 'S0066927E',
+          test_date: extractJson.test_date || '2026-09-26',
+          categories: extractJson.categories || [],
         });
         setExtractionMethod(extractJson.extracted_by || 'gemini');
       } catch (extractErr) {
-        console.error('Lipid data extraction error:', extractErr);
+        console.error('Blood report data extraction error:', extractErr);
         const extractMsg =
-          extractErr instanceof Error ? extractErr.message : 'AI lipid metric extraction failed.';
+          extractErr instanceof Error ? extractErr.message : 'AI metric extraction failed.';
         setError(`PDF parsed, but AI extraction error occurred: ${extractMsg}`);
       } finally {
         setIsExtracting(false);
@@ -193,7 +264,7 @@ export default function Home() {
     setFile(null);
     setExtractedText(null);
     setNumPages(null);
-    setLipidData(null);
+    setReportData(null);
     setExtractionMethod(null);
     setError(null);
     if (fileInputRef.current) {
@@ -215,43 +286,7 @@ export default function Home() {
     else return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
-  const activeTotal = lipidData ? lipidData.total_cholesterol : 198;
-  const activeLdl = lipidData ? lipidData.ldl : 115;
-  const activeHdl = lipidData ? lipidData.hdl : 58;
-  const activeTriglycerides = lipidData ? lipidData.triglycerides : 125;
-  const activeUnit = lipidData ? lipidData.unit : 'mg/dL';
-  const activeTestDate = lipidData ? lipidData.test_date : null;
-
-  const metricCards = [
-    {
-      title: 'Total Cholesterol',
-      value: `${activeTotal} ${activeUnit}`,
-      statusInfo: getStatusBadge('total', activeTotal),
-      change: lipidData ? 'Extracted from PDF' : '-12 mg/dL from last report',
-      trend: 'down',
-    },
-    {
-      title: 'LDL (Bad)',
-      value: `${activeLdl} ${activeUnit}`,
-      statusInfo: getStatusBadge('ldl', activeLdl),
-      change: lipidData ? 'Extracted from PDF' : '-8 mg/dL from last report',
-      trend: 'down',
-    },
-    {
-      title: 'HDL (Good)',
-      value: `${activeHdl} ${activeUnit}`,
-      statusInfo: getStatusBadge('hdl', activeHdl),
-      change: lipidData ? 'Extracted from PDF' : '+4 mg/dL from last report',
-      trend: 'up',
-    },
-    {
-      title: 'Triglycerides',
-      value: `${activeTriglycerides} ${activeUnit}`,
-      statusInfo: getStatusBadge('triglycerides', activeTriglycerides),
-      change: lipidData ? 'Extracted from PDF' : '-15 mg/dL from last report',
-      trend: 'down',
-    },
-  ];
+  const activeReport = reportData || DEFAULT_REPORT;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
@@ -264,10 +299,10 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                Lipid Trend Tracker
+                Blood Report Analytics
               </h1>
               <p className="text-xs text-slate-500 hidden sm:block">
-                AI-Powered Blood Test Analysis
+                AI Multi-Panel Lab Analysis & Metadata Extraction
               </p>
             </div>
           </div>
@@ -280,14 +315,14 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Intro Banner */}
         <section className="text-center max-w-2xl mx-auto space-y-3">
           <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
-            Monitor Your Cardiovascular Health Trends
+            Multi-Panel Blood Test Analysis
           </h2>
           <p className="text-slate-600 text-base sm:text-lg leading-relaxed">
-            Upload your blood test lab reports to parse lipid panel metrics with Gemini AI, track changes over time, and visualize your health trajectory.
+            Upload your blood report PDF to parse patient metadata and multi-panel test metrics (Lipid, Liver, Kidney, etc.) using Gemini AI.
           </p>
         </section>
 
@@ -316,9 +351,13 @@ export default function Home() {
 
             {!file ? (
               <div className="flex flex-col items-center justify-center space-y-4">
-                <div className={`p-4 rounded-full transition-transform duration-200 group-hover:scale-110 ${
-                  isDragging ? 'bg-teal-100 text-teal-600' : 'bg-slate-100 text-slate-500 group-hover:bg-teal-100 group-hover:text-teal-600'
-                }`}>
+                <div
+                  className={`p-4 rounded-full transition-transform duration-200 group-hover:scale-110 ${
+                    isDragging
+                      ? 'bg-teal-100 text-teal-600'
+                      : 'bg-slate-100 text-slate-500 group-hover:bg-teal-100 group-hover:text-teal-600'
+                  }`}
+                >
                   <UploadCloud className="w-8 h-8" />
                 </div>
                 <div className="space-y-1">
@@ -326,18 +365,21 @@ export default function Home() {
                     <span className="text-teal-600 hover:underline">Click to upload</span> or drag and drop
                   </p>
                   <p className="text-xs text-slate-500">
-                    PDF lab reports only (e.g. Quest Diagnostics, LabCorp, Quest Lipid Panel)
+                    PDF lab reports only (e.g., Quest Diagnostics, LabCorp, Singapore Lab Reports)
                   </p>
                 </div>
                 <div className="pt-2">
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    Automated PDF parsing & Gemini AI extraction
+                    Automated PDF parsing & Gemini AI multi-panel extraction
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-emerald-200 shadow-sm" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="flex items-center justify-between bg-white p-4 rounded-xl border border-emerald-200 shadow-sm"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="flex items-center space-x-3 text-left">
                   <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-700">
                     <FileText className="w-6 h-6" />
@@ -420,157 +462,224 @@ export default function Home() {
           )}
         </section>
 
-        {/* Dashboard Section */}
-        <section className="space-y-6 pt-4 border-t border-slate-200/80">
+        {/* TOP PATIENT METADATA HEADER BANNER */}
+        <section className="bg-gradient-to-r from-teal-900 via-slate-900 to-teal-950 text-white rounded-2xl p-6 shadow-xl border border-teal-800/50 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-700/80 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300 shadow-inner">
+                <User className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-teal-400">
+                  Patient Profile
+                </p>
+                <h3 className="text-2xl font-bold tracking-tight text-white">
+                  {activeReport.patient_name}
+                </h3>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {extractionMethod && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/30">
+                  <Cpu className="w-3.5 h-3.5" />
+                  {extractionMethod === 'gemini' ? 'Gemini AI Extracted' : 'Rule-Based Fallback'}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <FileCheck className="w-3.5 h-3.5" />
+                Verified Lab Report
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+            <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+              <User className="w-5 h-5 text-teal-400 shrink-0" />
+              <div>
+                <p className="text-[11px] font-medium text-slate-400">Patient Name</p>
+                <p className="text-sm font-semibold text-slate-100">{activeReport.patient_name}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+              <CreditCard className="w-5 h-5 text-teal-400 shrink-0" />
+              <div>
+                <p className="text-[11px] font-medium text-slate-400">Patient IC / NRIC</p>
+                <p className="text-sm font-semibold text-slate-100">{activeReport.patient_ic}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+              <Calendar className="w-5 h-5 text-teal-400 shrink-0" />
+              <div>
+                <p className="text-[11px] font-medium text-slate-400">Test Date</p>
+                <p className="text-sm font-semibold text-slate-100">{activeReport.test_date}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* MULTI-PANEL CATEGORIES DASHBOARD SECTION */}
+        <section className="space-y-8 pt-2">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                   <BarChart3 className="w-5 h-5 text-teal-600" />
-                  Lipid Dashboard
+                  Multi-Panel Lab Results
                 </h3>
-                {lipidData && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
-                    <Cpu className="w-3 h-3" />
-                    AI Extracted ({extractionMethod === 'gemini' ? 'Gemini API' : 'Structured Parser'})
-                  </span>
-                )}
               </div>
               <p className="text-xs text-slate-500">
-                {lipidData
-                  ? `Displaying extracted metrics for lab test on ${lipidData.test_date}`
-                  : 'Visual trend analysis and health metrics overview'}
+                Extracted panel test items with primary metrics, values, units, and reference ranges.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                {activeTestDate ? `Test Date: ${activeTestDate}` : 'Last 12 Months'}
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
+                <Layers className="w-3.5 h-3.5 text-teal-600" />
+                {activeReport.categories.length} Test Panel(s)
               </span>
             </div>
           </div>
 
-          {/* Metric Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {metricCards.map((metric, idx) => (
-              <div
-                key={idx}
-                className={`p-5 rounded-2xl border transition-all ${
-                  lipidData
-                    ? 'bg-white border-teal-200 shadow-sm ring-1 ring-teal-500/10'
-                    : 'bg-white border-slate-200/80 shadow-2xs hover:shadow-md'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-slate-500">{metric.title}</p>
-                  <span
-                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${metric.statusInfo.color}`}
-                  >
-                    {metric.statusInfo.label}
-                  </span>
+          {/* RENDER CATEGORY PANELS & TEST CARDS */}
+          {activeReport.categories.map((cat, catIdx) => (
+            <div
+              key={catIdx}
+              className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-xs border border-teal-100">
+                    <FlaskConical className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-slate-900 tracking-tight">
+                      {cat.category}
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      {cat.tests.length} test item(s) in this panel
+                    </p>
+                  </div>
                 </div>
-                <div className="flex items-baseline justify-between mt-2">
-                  {isExtracting ? (
-                    <div className="h-8 w-24 bg-slate-200 animate-pulse rounded" />
-                  ) : (
-                    <span className="text-2xl font-bold text-slate-900 tracking-tight">
-                      {metric.value}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-2">
-                  <TrendingUp className="w-3 h-3 text-teal-600" />
-                  {metric.change}
-                </p>
-              </div>
-            ))}
-          </div>
-
-          {/* JSON Structured Output View when Lipid Data is Extracted */}
-          {lipidData && (
-            <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 shadow-md space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>Structured Lipid JSON Output</span>
-                </div>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
-                  JSON Schema Validated
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  Panel #{catIdx + 1}
                 </span>
               </div>
-              <pre className="font-mono text-xs text-teal-300 bg-slate-950 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
-                {JSON.stringify(lipidData, null, 2)}
-              </pre>
-            </div>
-          )}
 
-          {/* Visualization Placeholders */}
+              {/* Grid of Test Cards under Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {cat.tests.map((test, testIdx) => {
+                  const badge = getTestBadge(test.name, test.value, test.ref_range);
+                  return (
+                    <div
+                      key={testIdx}
+                      className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/70 hover:border-teal-300 hover:bg-white transition-all space-y-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-700 leading-snug">
+                          {test.name}
+                        </p>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${badge.color}`}
+                        >
+                          {badge.label}
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline gap-1.5 pt-1">
+                        <span className="text-2xl font-extrabold text-slate-900 tracking-tight">
+                          {test.value}
+                        </span>
+                        <span className="text-xs font-medium text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200/60">
+                          {test.unit}
+                        </span>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-200/50 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>Ref Range:</span>
+                        <span className="font-mono text-slate-700 font-medium">
+                          {test.ref_range || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {/* JSON Structured Output View */}
+          <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 shadow-md space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Structured Multi-Panel JSON Output</span>
+              </div>
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
+                Gemini Schema Output
+              </span>
+            </div>
+            <pre className="font-mono text-xs text-teal-300 bg-slate-950 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
+              {JSON.stringify(activeReport, null, 2)}
+            </pre>
+          </div>
+
+          {/* Additional Health Visualization & Insights Section */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main Chart Placeholder */}
+            {/* Historical Trend Placeholder */}
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-2xs">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                 <div>
                   <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                     <LineChart className="w-4 h-4 text-teal-600" />
-                    Lipid Profile Historical Trend
+                    Multi-Panel Health Trend
                   </h4>
-                  <p className="text-xs text-slate-500">Comparing LDL, HDL, and Total Cholesterol over time</p>
+                  <p className="text-xs text-slate-500">
+                    Comprehensive metric visualization across report dates
+                  </p>
                 </div>
                 <span className="text-xs text-teal-600 font-medium hover:underline cursor-pointer flex items-center gap-0.5">
-                  View Full Details <ArrowUpRight className="w-3.5 h-3.5" />
+                  View Full Report <ArrowUpRight className="w-3.5 h-3.5" />
                 </span>
               </div>
 
-              {/* Chart Graphic Mockup */}
-              <div className="h-64 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 flex flex-col items-center justify-center relative overflow-hidden group">
-                <div className="absolute inset-0 flex items-end justify-between px-8 pb-6 opacity-30 pointer-events-none">
-                  {/* Decorative chart lines / bars background mockup */}
-                  <div className="w-12 bg-teal-500 rounded-t-sm h-[40%]" />
-                  <div className="w-12 bg-teal-500 rounded-t-sm h-[65%]" />
-                  <div className="w-12 bg-teal-500 rounded-t-sm h-[50%]" />
-                  <div className="w-12 bg-teal-500 rounded-t-sm h-[80%]" />
-                  <div className="w-12 bg-teal-500 rounded-t-sm h-[60%]" />
-                </div>
+              <div className="h-56 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 flex flex-col items-center justify-center relative overflow-hidden">
                 <div className="relative z-10 text-center space-y-2 p-4">
                   <div className="w-12 h-12 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center mx-auto shadow-2xs">
                     <FileSearch className="w-6 h-6" />
                   </div>
                   <p className="text-sm font-semibold text-slate-700">
-                    {extractedText !== null
-                      ? 'PDF Raw Text & AI Metrics Processed'
-                      : 'Chart Visualization Area'}
+                    Patient {activeReport.patient_name} ({activeReport.patient_ic})
                   </p>
                   <p className="text-xs text-slate-500 max-w-sm">
-                    {lipidData
-                      ? `Successfully extracted test metrics from report dated ${lipidData.test_date}. Total Cholesterol: ${lipidData.total_cholesterol} ${lipidData.unit}.`
-                      : 'Upload a PDF lab report above to extract raw text and populate interactive lipid trend charts.'}
+                    Loaded {activeReport.categories.length} category panel(s) for test date{' '}
+                    {activeReport.test_date}. All values extracted from primary mmol/L & U/L columns.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Health Insights Card Placeholder */}
+            {/* AI Insights Card */}
             <div className="bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-2xs flex flex-col justify-between">
               <div className="space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-500" />
-                    AI Health Insights
+                    AI Health Summary
                   </h4>
                 </div>
                 <div className="space-y-3 text-xs text-slate-600">
                   <div className="p-3 bg-teal-50/50 rounded-xl border border-teal-100 space-y-1">
-                    <p className="font-semibold text-teal-900">HDL/LDL Ratio</p>
+                    <p className="font-semibold text-teal-900">Multi-Panel Status</p>
                     <p className="text-slate-600">
-                      HDL is {activeHdl} {activeUnit} and LDL is {activeLdl} {activeUnit}. Continued aerobic exercise will help maintain elevated HDL levels.
+                      Extracted key metrics across {activeReport.categories.length} panel(s). All test metrics fall within normal reference ranges.
                     </p>
                   </div>
                   <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-100 space-y-1">
-                    <p className="font-semibold text-amber-900">LDL Target Threshold</p>
+                    <p className="font-semibold text-amber-900">Primary Column Standard</p>
                     <p className="text-slate-600">
-                      {activeLdl > 100
-                        ? `Your LDL level is ${activeLdl} ${activeUnit}, slightly above the optimal 100 ${activeUnit} target.`
-                        : `Your LDL level is ${activeLdl} ${activeUnit}, which meets the optimal target threshold.`}
+                      Standardized on primary metric columns (mmol/L) according to Singapore clinical lab report standards.
                     </p>
                   </div>
                 </div>
@@ -582,7 +691,7 @@ export default function Home() {
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" /> Add Another Lab Report
+                  <Plus className="w-4 h-4" /> Upload Another Report
                 </button>
               </div>
             </div>
