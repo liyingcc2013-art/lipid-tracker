@@ -20,7 +20,6 @@ import {
   Code2,
   Copy,
   Check,
-  Cpu,
   User,
   CreditCard,
   FlaskConical,
@@ -112,7 +111,6 @@ export default function Home() {
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [reportData, setReportData] = useState<BloodReportData | null>(null);
-  const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,7 +132,6 @@ export default function Home() {
     setExtractedText(null);
     setNumPages(null);
     setReportData(null);
-    setExtractionMethod(null);
 
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
       setError('Please upload a valid PDF document containing your lab report.');
@@ -189,18 +186,17 @@ export default function Home() {
           test_date: extractJson.test_date || '',
           categories: extractJson.categories || [],
         });
-        setExtractionMethod(extractJson.extracted_by || 'gemini');
       } catch (extractErr) {
         console.error('Blood report data extraction error:', extractErr);
         const extractMsg =
-          extractErr instanceof Error ? extractErr.message : 'AI metric extraction failed.';
-        setError(`PDF parsed, but AI extraction error occurred: ${extractMsg}`);
+          extractErr instanceof Error ? extractErr.message : String(extractErr);
+        setError(extractMsg);
       } finally {
         setIsExtracting(false);
       }
     } catch (err: unknown) {
       console.error('PDF parsing error:', err);
-      const msg = err instanceof Error ? err.message : 'An error occurred while parsing the PDF.';
+      const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
     } finally {
       setIsProcessing(false);
@@ -230,7 +226,6 @@ export default function Home() {
     setExtractedText(null);
     setNumPages(null);
     setReportData(null);
-    setExtractionMethod(null);
     setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -388,7 +383,7 @@ export default function Home() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-3 rounded-lg">
+            <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-3 rounded-lg font-mono whitespace-pre-wrap break-all">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
@@ -449,12 +444,6 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  {extractionMethod && (
-                    <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/30">
-                      <Cpu className="w-3.5 h-3.5" />
-                      {extractionMethod === 'gemini' ? 'Gemini AI Extracted' : 'Rule-Based Fallback'}
-                    </span>
-                  )}
                   <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                     <FileCheck className="w-3.5 h-3.5" />
                     Verified Lab Report

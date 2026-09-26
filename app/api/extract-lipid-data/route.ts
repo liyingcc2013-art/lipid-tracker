@@ -20,115 +20,6 @@ export interface BloodReportData {
   categories: CategoryPanel[];
 }
 
-function parseFallbackDate(rawText: string): string {
-  // Try YYYY-MM-DD
-  const isoMatch = rawText.match(/\b(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
-  if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-  }
-
-  // Try MM/DD/YYYY or DD/MM/YYYY
-  const dateMatch = rawText.match(/\b([0-3]?\d)[-/]([0-3]?\d)[-/](20\d{2})\b/);
-  if (dateMatch) {
-    const p1 = dateMatch[1].padStart(2, '0');
-    const p2 = dateMatch[2].padStart(2, '0');
-    const year = dateMatch[3];
-    return `${year}-${p2}-${p1}`;
-  }
-
-  // Try Month DD, YYYY or DD Month YYYY
-  const monthMap: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-    january: '01', february: '02', march: '03', april: '04', june: '06',
-    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
-  };
-
-  const textDateMatch = rawText.match(/\b([A-Za-z]+)\s+([0-9]{1,2}),?\s+(20\d{2})\b/i);
-  if (textDateMatch) {
-    const month = monthMap[textDateMatch[1].toLowerCase()];
-    if (month) {
-      const day = textDateMatch[2].padStart(2, '0');
-      return `${textDateMatch[3]}-${month}-${day}`;
-    }
-  }
-
-  return '';
-}
-
-function extractBloodReportFallback(text: string): BloodReportData {
-  // Extract Patient Name
-  const nameMatch = text.match(/(?:Patient\s*Name|Name|Patient)\s*[:=]?\s*([^\r\n]+)/i);
-  let patient_name = nameMatch ? nameMatch[1].trim() : '';
-  patient_name = patient_name.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:NRIC|IC|ID|Date|Sex|Gender|DOB)\b.*/i, '').trim();
-
-  // Extract NRIC/IC
-  const icMatch = text.match(/\b([STFGM]\d{7}[A-Z])\b/i) || text.match(/(?:NRIC|IC|ID)\s*[:=]?\s*([A-Z0-9]+)/i);
-  const patient_ic = icMatch ? icMatch[1].trim().toUpperCase() : '';
-
-  // Extract Test Date
-  const test_date = parseFallbackDate(text);
-
-  const categories: CategoryPanel[] = [];
-
-  // Minimal regex extraction for lipid tests strictly if present
-  const lipidTests: TestItem[] = [];
-
-  const tcMatch = text.match(/(?:Total\s+Cholesterol|Cholesterol,?\s*Total)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (tcMatch) {
-    lipidTests.push({
-      name: 'Total Cholesterol',
-      value: parseFloat(tcMatch[1]),
-      unit: tcMatch[2] || 'mmol/L',
-      ref_range: '< 5.20'
-    });
-  }
-
-  const trigMatch = text.match(/(?:Triglycerides?)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (trigMatch) {
-    lipidTests.push({
-      name: 'Triglycerides',
-      value: parseFloat(trigMatch[1]),
-      unit: trigMatch[2] || 'mmol/L',
-      ref_range: '< 1.70'
-    });
-  }
-
-  const hdlMatch = text.match(/(?:HDL\s+Cholesterol|HDL-C)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (hdlMatch) {
-    lipidTests.push({
-      name: 'HDL Cholesterol',
-      value: parseFloat(hdlMatch[1]),
-      unit: hdlMatch[2] || 'mmol/L',
-      ref_range: '> 1.00'
-    });
-  }
-
-  const ldlMatch = text.match(/(?:LDL\s+Chol\s*\(Direct\)|LDL-C|LDL\s+Cholesterol)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (ldlMatch) {
-    lipidTests.push({
-      name: 'LDL Chol (Direct)',
-      value: parseFloat(ldlMatch[1]),
-      unit: ldlMatch[2] || 'mmol/L',
-      ref_range: '< 2.60'
-    });
-  }
-
-  if (lipidTests.length > 0) {
-    categories.push({
-      category: 'LIPID PROFILE',
-      tests: lipidTests,
-    });
-  }
-
-  return {
-    patient_name,
-    patient_ic,
-    test_date,
-    categories,
-  };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -147,159 +38,149 @@ export async function POST(req: NextRequest) {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
     if (!apiKey) {
-      console.warn('GEMINI_API_KEY not found in environment. Using fallback extraction.');
-      const fallbackData = extractBloodReportFallback(text);
-      return NextResponse.json({
-        success: true,
-        extracted_by: 'fallback',
-        ...fallbackData,
-      });
+      return NextResponse.json(
+        { error: 'GEMINI_API_KEY is not configured in the environment.' },
+        { status: 500 }
+      );
     }
 
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
-        systemInstruction:
-          'You are a strict medical data parser with spatial reasoning for handling disjointed and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it.\n\n' +
-          'CRITICAL PARSING & SPATIAL REASONING RULES:\n' +
-          '1. PATIENT NAME: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings." or disclaimers.\n' +
-          '2. TEST DATE: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.\n' +
-          '3. TEST RESULTS: Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters. You MUST find the English test name, scan forward past any Chinese characters, newlines, or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.',
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: SchemaType.OBJECT,
-            properties: {
-              patient_name: {
-                type: SchemaType.STRING,
-                description: 'Patient full name in ALL CAPS usually found near top near I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings."',
-              },
-              patient_ic: {
-                type: SchemaType.STRING,
-                description: 'Patient IC/NRIC/ID number, e.g., S0066927E',
-              },
-              test_date: {
-                type: SchemaType.STRING,
-                description: 'Date following keywords like "Collected:" or "Reported:" formatted as YYYY-MM-DD',
-              },
-              categories: {
-                type: SchemaType.ARRAY,
-                description: 'List of test categories/panels actively searched (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
-                items: {
-                  type: SchemaType.OBJECT,
-                  properties: {
-                    category: {
-                      type: SchemaType.STRING,
-                      description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE',
-                    },
-                    tests: {
-                      type: SchemaType.ARRAY,
-                      description: 'List of test items under this category using scan-forward method',
-                      items: {
-                        type: SchemaType.OBJECT,
-                        properties: {
-                          name: {
-                            type: SchemaType.STRING,
-                            description: 'English name of the test item ONLY (ignore Chinese characters)',
-                          },
-                          value: {
-                            type: SchemaType.NUMBER,
-                            description: 'VERY FIRST numeric value encountered when scanning forward past Chinese characters or blank spaces',
-                          },
-                          unit: {
-                            type: SchemaType.STRING,
-                            description: 'Unit of measurement associated with the numeric value, e.g., mmol/L, U/L, g/L, %',
-                          },
-                          ref_range: {
-                            type: SchemaType.STRING,
-                            description: 'Reference range string, e.g., < 5.20 or 10 - 50',
-                          },
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      systemInstruction:
+        'You are a strict medical data parser with spatial reasoning for handling disjointed, squashed, and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it.\n\n' +
+        'CRITICAL PARSING & SPATIAL REASONING RULES:\n' +
+        '1. PATIENT NAME: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings." or disclaimers.\n' +
+        '2. TEST DATE: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.\n' +
+        '3. SQUASHED & MERGED COLUMNS: The text contains merged columns like "3.59mmol/L(<5.20)139mg/dL". You must find the English test name, ignore the Chinese characters, and extract the FIRST numeric value and its immediate unit (e.g., 3.59 and mmol/L). Map these to: patient_name, patient_ic, test_date, and an array of panels containing tests.',
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            patient_name: {
+              type: SchemaType.STRING,
+              description: 'Patient full name in ALL CAPS usually found near top near I/C number or age/gender.',
+            },
+            patient_ic: {
+              type: SchemaType.STRING,
+              description: 'Patient IC/NRIC/ID number, e.g., S0066927E',
+            },
+            test_date: {
+              type: SchemaType.STRING,
+              description: 'Date following keywords like "Collected:" or "Reported:" formatted as YYYY-MM-DD',
+            },
+            categories: {
+              type: SchemaType.ARRAY,
+              description: 'List of test categories/panels present in the report',
+              items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  category: {
+                    type: SchemaType.STRING,
+                    description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE',
+                  },
+                  tests: {
+                    type: SchemaType.ARRAY,
+                    description: 'List of test items under this category',
+                    items: {
+                      type: SchemaType.OBJECT,
+                      properties: {
+                        name: {
+                          type: SchemaType.STRING,
+                          description: 'English name of the test item ONLY (ignore Chinese characters)',
                         },
-                        required: ['name', 'value', 'unit', 'ref_range'],
+                        value: {
+                          type: SchemaType.NUMBER,
+                          description: 'FIRST numeric value extracted for this test item',
+                        },
+                        unit: {
+                          type: SchemaType.STRING,
+                          description: 'Immediate unit associated with the numeric value, e.g., mmol/L, U/L, g/L, %',
+                        },
+                        ref_range: {
+                          type: SchemaType.STRING,
+                          description: 'Reference range string, e.g., < 5.20 or 10 - 50',
+                        },
                       },
+                      required: ['name', 'value', 'unit', 'ref_range'],
                     },
                   },
-                  required: ['category', 'tests'],
                 },
+                required: ['category', 'tests'],
               },
             },
-            required: ['patient_name', 'patient_ic', 'test_date', 'categories'],
           },
+          required: ['patient_name', 'patient_ic', 'test_date', 'categories'],
         },
-      });
+      },
+    });
 
-      const prompt = `Analyze the following blood test lab report text and extract complete multi-panel test metrics along with patient metadata.
+    const prompt = `Analyze the following blood test lab report text and extract complete multi-panel test metrics along with patient metadata.
 
-INSTRUCTIONS & RULES FOR DISJOINTED 1D SCRAMBLED TEXT:
+INSTRUCTIONS & RULES FOR SQUASHED / MERGED TEXT:
 1. Patient Metadata:
    - Extract patient_name: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "'s clinical findings."
    - Extract patient_ic (string).
    - Extract test_date: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.
 
-2. Multi-Panel & Spatial Reasoning Extraction Rules:
-   - Actively search for all panels present in the report, including LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE, and any other panels.
-   - Extract all associated tests within these panels using spatial reasoning for scrambled 1D text.
-   - Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters.
-   - You must find the English test name, scan forward past any Chinese characters or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.
+2. Merged Column Extraction Rules:
+   - The text contains merged columns like '3.59mmol/L(<5.20)139mg/dL'. You must find the English test name, ignore the Chinese characters, and extract the FIRST numeric value and its immediate unit (e.g., 3.59 and mmol/L). Map these to: patient_name, patient_ic, test_date, and an array of panels containing tests.
+   - Actively search for all panels present in the report.
    - You MUST NOT generate synthetic data, infer, or hallucinate missing tests.
    - Extract ONLY tests explicitly present in the text.
 
 3. Dynamic Test Categories:
-   - Group all extracted tests into their respective panel categories (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).
+   - Group all extracted tests into their respective panel categories (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE).
    - Return an array of categories, each containing:
      - category: Name of the test panel/category
      - tests: Array of test items under that category.
        Each test item must have:
        - name: string (English name only)
-       - value: number (VERY FIRST numeric value encountered after scanning forward)
-       - unit: string
+       - value: number (FIRST numeric value extracted)
+       - unit: string (immediate unit)
        - ref_range: string
-
-Return strict JSON conforming to the requested schema.
 
 Lab report text:
 """
 ${text}
 """`;
 
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text();
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
 
+    let parsedJson;
+    try {
       // Clean response string if wrapped in markdown code block
       const cleanedJsonText = responseText
-        .replace(/^```(?:json)?/g, '')
+        .replace(/^```(?:json)?/gi, '')
         .replace(/```$/g, '')
         .trim();
-
-      const parsedJson = JSON.parse(cleanedJsonText);
-
-      const reportData: BloodReportData = {
-        patient_name: String(parsedJson.patient_name || ''),
-        patient_ic: String(parsedJson.patient_ic || ''),
-        test_date: String(parsedJson.test_date || ''),
-        categories: Array.isArray(parsedJson.categories) ? parsedJson.categories : [],
-      };
-
-      return NextResponse.json({
-        success: true,
-        extracted_by: 'gemini',
-        ...reportData,
-      });
-    } catch (aiError) {
-      console.error('Gemini API extraction failed, using fallback parser:', aiError);
-      const fallbackData = extractBloodReportFallback(text);
-      return NextResponse.json({
-        success: true,
-        extracted_by: 'fallback',
-        ...fallbackData,
-      });
+      parsedJson = JSON.parse(cleanedJsonText);
+    } catch (parseErr: unknown) {
+      const parseErrMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      return NextResponse.json(
+        { error: `JSON parse error: ${parseErrMsg}. Raw output: ${responseText}` },
+        { status: 500 }
+      );
     }
+
+    const reportData: BloodReportData = {
+      patient_name: String(parsedJson.patient_name || ''),
+      patient_ic: String(parsedJson.patient_ic || ''),
+      test_date: String(parsedJson.test_date || ''),
+      categories: Array.isArray(parsedJson.categories) ? parsedJson.categories : [],
+    };
+
+    return NextResponse.json({
+      success: true,
+      ...reportData,
+    });
   } catch (err: unknown) {
     console.error('Error in extract-lipid-data route:', err);
     const errorMessage =
-      err instanceof Error ? err.message : 'Failed to extract blood report data.';
+      err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
