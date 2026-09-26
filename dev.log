@@ -5,27 +5,8 @@
 ▲ Next.js 16.3.5 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
-✓ Ready in 547ms
-✓ Running next.config.ts took 45ms
+✓ Ready in 529ms
+✓ Running next.config.ts took 41ms
 
- HEAD / 200 in 3.3s (next.js: 3.0s, application-code: 239ms)
- GET / 200 in 94ms (next.js: 12ms, application-code: 83ms)
-○ Compiling /api/parse-pdf ...
-Error parsing PDF: UnknownErrorException: bad XRef entry
-    at POST (app/api/parse-pdf/route.ts:27:38)
-  25 |     const buffer = Buffer.from(arrayBuffer);
-  26 |
-> 27 |     const parsedData = await pdfParse(buffer);
-     |                                      ^
-  28 |
-  29 |     return NextResponse.json({
-  30 |       success: true, {
-  details: 'FormatError: bad XRef entry'
-}
-(node:55656) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
-(Use `node --trace-deprecation ...` to show where the warning was created)
- POST /api/parse-pdf 500 in 4.8s (next.js: 4.1s, application-code: 719ms)
- GET / 200 in 84ms (next.js: 12ms, application-code: 72ms)
- POST /api/parse-pdf 200 in 66ms (next.js: 7ms, application-code: 59ms)
-GEMINI_API_KEY not found in environment. Using rule-based fallback extraction.
- POST /api/extract-lipid-data 200 in 319ms (next.js: 300ms, application-code: 19ms)
+ HEAD / 200 in 2.9s (next.js: 2.6s, application-code: 223ms)
+ GET / 200 in 67ms (next.js: 10ms, application-code: 57ms)
