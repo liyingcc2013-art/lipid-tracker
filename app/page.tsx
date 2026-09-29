@@ -6,25 +6,14 @@ import {
   FileText,
   X,
   CheckCircle2,
-  AlertCircle,
   Activity,
-  FileSearch,
-  LineChart,
-  BarChart3,
-  Calendar,
-  Sparkles,
-  ArrowUpRight,
-  ShieldCheck,
-  Plus,
-  Loader2,
   Code2,
   Copy,
   Check,
-  User,
-  CreditCard,
-  FlaskConical,
-  Layers,
-  FileCheck
+  Loader2,
+  Sparkles,
+  Server,
+  AlertCircle
 } from 'lucide-react';
 
 interface UploadedFile {
@@ -32,74 +21,6 @@ interface UploadedFile {
   size: number;
   type: string;
   lastModified: number;
-}
-
-export interface TestItem {
-  name: string;
-  value: number;
-  unit: string;
-  ref_range: string;
-}
-
-export interface CategoryPanel {
-  category: string;
-  tests: TestItem[];
-}
-
-export interface BloodReportData {
-  patient_name: string;
-  patient_ic: string;
-  test_date: string;
-  categories: CategoryPanel[];
-}
-
-function getTestBadge(testName: string, value: number, refRange: string) {
-  const name = testName.toLowerCase();
-  // Check for common upper bounds in ref range
-  if (refRange.includes('<')) {
-    const limit = parseFloat(refRange.replace(/[^0-9.]/g, ''));
-    if (!isNaN(limit)) {
-      if (value <= limit) {
-        return { label: 'In Range', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-      } else if (value <= limit * 1.15) {
-        return { label: 'Borderline', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-      } else {
-        return { label: 'Elevated', color: 'bg-rose-50 text-rose-700 border-rose-200' };
-      }
-    }
-  }
-
-  // Check for lower bounds in ref range (e.g. > 1.00)
-  if (refRange.includes('>')) {
-    const limit = parseFloat(refRange.replace(/[^0-9.]/g, ''));
-    if (!isNaN(limit)) {
-      if (value >= limit) {
-        return { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-      } else {
-        return { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
-      }
-    }
-  }
-
-  // Range min - max (e.g., 10 - 50)
-  if (refRange.includes('-')) {
-    const parts = refRange.split('-').map(p => parseFloat(p.replace(/[^0-9.]/g, '')));
-    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      if (value >= parts[0] && value <= parts[1]) {
-        return { label: 'Normal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
-      } else if (value < parts[0]) {
-        return { label: 'Low', color: 'bg-amber-50 text-amber-700 border-amber-200' };
-      } else {
-        return { label: 'High', color: 'bg-rose-50 text-rose-700 border-rose-200' };
-      }
-    }
-  }
-
-  if (name.includes('hdl')) {
-    return value >= 1.0 ? { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' } : { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
-  }
-
-  return { label: 'Normal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
 }
 
 export default function Home() {
@@ -110,7 +31,7 @@ export default function Home() {
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
   const [extractedText, setExtractedText] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
-  const [reportData, setReportData] = useState<BloodReportData | null>(null);
+  const [models, setModels] = useState<string[] | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -131,10 +52,10 @@ export default function Home() {
     setError(null);
     setExtractedText(null);
     setNumPages(null);
-    setReportData(null);
+    setModels(null);
 
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
-      setError('Please upload a valid PDF document containing your lab report.');
+      setError('Please upload a valid PDF document.');
       return;
     }
 
@@ -165,7 +86,7 @@ export default function Home() {
       setExtractedText(data.text);
       setNumPages(data.numpages);
 
-      // Trigger AI Extraction of structured blood report metrics & metadata
+      // Trigger AI Diagnostic Probe
       setIsExtracting(true);
       try {
         const extractRes = await fetch('/api/extract-lipid-data', {
@@ -176,18 +97,13 @@ export default function Home() {
 
         const extractJson = await extractRes.json();
 
-        if (!extractRes.ok) {
-          throw new Error(extractJson.error || 'Failed to extract report data.');
+        if (extractJson.models && Array.isArray(extractJson.models)) {
+          setModels(extractJson.models);
+        } else if (extractJson.error) {
+          setError(extractJson.error);
         }
-
-        setReportData({
-          patient_name: extractJson.patient_name || '',
-          patient_ic: extractJson.patient_ic || '',
-          test_date: extractJson.test_date || '',
-          categories: extractJson.categories || [],
-        });
       } catch (extractErr) {
-        console.error('Blood report data extraction error:', extractErr);
+        console.error('Diagnostic model probe error:', extractErr);
         const extractMsg =
           extractErr instanceof Error ? extractErr.message : String(extractErr);
         setError(extractMsg);
@@ -225,7 +141,7 @@ export default function Home() {
     setFile(null);
     setExtractedText(null);
     setNumPages(null);
-    setReportData(null);
+    setModels(null);
     setError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -246,10 +162,6 @@ export default function Home() {
     else return (bytes / 1048576).toFixed(1) + ' MB';
   };
 
-  const totalTests = reportData
-    ? reportData.categories.reduce((acc, cat) => acc + cat.tests.length, 0)
-    : 0;
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16">
       {/* Header Navigation */}
@@ -261,18 +173,12 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900">
-                Blood Report Analytics
+                Gemini Model Diagnostic Probe
               </h1>
               <p className="text-xs text-slate-500 hidden sm:block">
-                AI Multi-Panel Lab Analysis & Metadata Extraction
+                Listing available models for API Key
               </p>
             </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              HIPAA Compliant Demo
-            </span>
           </div>
         </div>
       </header>
@@ -281,10 +187,10 @@ export default function Home() {
         {/* Intro Banner */}
         <section className="text-center max-w-2xl mx-auto space-y-3">
           <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
-            Multi-Panel Blood Test Analysis
+            Available Gemini Models
           </h2>
           <p className="text-slate-600 text-base sm:text-lg leading-relaxed">
-            Upload your blood report PDF to parse patient metadata and multi-panel test metrics using Gemini AI.
+            Upload a PDF document to probe Google Generative Language API and view available models for your API key.
           </p>
         </section>
 
@@ -327,13 +233,13 @@ export default function Home() {
                     <span className="text-teal-600 hover:underline">Click to upload</span> or drag and drop
                   </p>
                   <p className="text-xs text-slate-500">
-                    PDF lab reports only (e.g., Innoquest, Quest Diagnostics, LabCorp)
+                    PDF lab report or document
                   </p>
                 </div>
                 <div className="pt-2">
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-medium">
                     <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    Automated PDF parsing & Gemini AI multi-panel extraction
+                    Diagnostic Model Registry Probe
                   </span>
                 </div>
               </div>
@@ -357,16 +263,16 @@ export default function Home() {
                         </span>
                       ) : isExtracting ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-100 text-teal-800">
-                          <Loader2 className="w-3 h-3 animate-spin" /> AI Extracting...
+                          <Loader2 className="w-3 h-3 animate-spin" /> Fetching Models...
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                          <CheckCircle2 className="w-3 h-3" /> Extracted
+                          <CheckCircle2 className="w-3 h-3" /> Complete
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {formatFileSize(file.size)} • {numPages ? `${numPages} page(s) • ` : ''}PDF Report
+                      {formatFileSize(file.size)} • {numPages ? `${numPages} page(s) • ` : ''}PDF
                     </p>
                   </div>
                 </div>
@@ -424,232 +330,27 @@ export default function Home() {
           )}
         </section>
 
-        {reportData && (
-          <>
-            {/* TOP PATIENT METADATA HEADER BANNER */}
-            <section className="bg-gradient-to-r from-teal-900 via-slate-900 to-teal-950 text-white rounded-2xl p-6 shadow-xl border border-teal-800/50 space-y-4">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-700/80 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300 shadow-inner">
-                    <User className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-teal-400">
-                      Patient Profile
-                    </p>
-                    <h3 className="text-2xl font-bold tracking-tight text-white">
-                      {reportData.patient_name || 'N/A'}
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    <FileCheck className="w-3.5 h-3.5" />
-                    Verified Lab Report
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                  <User className="w-5 h-5 text-teal-400 shrink-0" />
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-400">Patient Name</p>
-                    <p className="text-sm font-semibold text-slate-100">{reportData.patient_name || 'N/A'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                  <CreditCard className="w-5 h-5 text-teal-400 shrink-0" />
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-400">Patient IC / NRIC</p>
-                    <p className="text-sm font-semibold text-slate-100">{reportData.patient_ic || 'N/A'}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
-                  <Calendar className="w-5 h-5 text-teal-400 shrink-0" />
-                  <div>
-                    <p className="text-[11px] font-medium text-slate-400">Test Date</p>
-                    <p className="text-sm font-semibold text-slate-100">{reportData.test_date || 'N/A'}</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* MULTI-PANEL CATEGORIES DASHBOARD SECTION */}
-            <section className="space-y-8 pt-2">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 text-teal-600" />
-                      Multi-Panel Lab Results
-                    </h3>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    Extracted panel test items with values, units, and reference ranges.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-lg shadow-2xs">
-                    <Layers className="w-3.5 h-3.5 text-teal-600" />
-                    {reportData.categories.length} Test Panel(s)
-                  </span>
-                </div>
-              </div>
-
-              {/* RENDER CATEGORY PANELS & TEST CARDS */}
-              {reportData.categories.map((cat, catIdx) => (
-                <div
-                  key={catIdx}
-                  className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5"
-                >
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-lg bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-xs border border-teal-100">
-                        <FlaskConical className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-base font-bold text-slate-900 tracking-tight">
-                          {cat.category}
-                        </h4>
-                        <p className="text-[11px] text-slate-500">
-                          {cat.tests.length} test item(s) in this panel
-                        </p>
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
-                      Panel #{catIdx + 1}
-                    </span>
-                  </div>
-
-                  {/* Grid of Test Cards under Category */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {cat.tests.map((test, testIdx) => {
-                      const badge = getTestBadge(test.name, test.value, test.ref_range);
-                      return (
-                        <div
-                          key={testIdx}
-                          className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/70 hover:border-teal-300 hover:bg-white transition-all space-y-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-xs font-semibold text-slate-700 leading-snug">
-                              {test.name}
-                            </p>
-                            <span
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${badge.color}`}
-                            >
-                              {badge.label}
-                            </span>
-                          </div>
-
-                          <div className="flex items-baseline gap-1.5 pt-1">
-                            <span className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                              {test.value}
-                            </span>
-                            <span className="text-xs font-medium text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200/60">
-                              {test.unit}
-                            </span>
-                          </div>
-
-                          <div className="pt-1 border-t border-slate-200/50 flex items-center justify-between text-[11px] text-slate-500">
-                            <span>Ref Range:</span>
-                            <span className="font-mono text-slate-700 font-medium">
-                              {test.ref_range || 'N/A'}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-
-              {/* JSON Structured Output View */}
-              <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 shadow-md space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Structured Multi-Panel JSON Output</span>
-                  </div>
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
-                    Gemini Schema Output
-                  </span>
-                </div>
-                <pre className="font-mono text-xs text-teal-300 bg-slate-950 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
-                  {JSON.stringify(reportData, null, 2)}
-                </pre>
-              </div>
-
-              {/* Additional Health Visualization & Insights Section */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Historical Trend Placeholder */}
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-2xs">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                        <LineChart className="w-4 h-4 text-teal-600" />
-                        Multi-Panel Health Trend
-                      </h4>
-                      <p className="text-xs text-slate-500">
-                        Comprehensive metric visualization across report dates
-                      </p>
-                    </div>
-                    <span className="text-xs text-teal-600 font-medium hover:underline cursor-pointer flex items-center gap-0.5">
-                      View Full Report <ArrowUpRight className="w-3.5 h-3.5" />
-                    </span>
-                  </div>
-
-                  <div className="h-56 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 flex flex-col items-center justify-center relative overflow-hidden">
-                    <div className="relative z-10 text-center space-y-2 p-4">
-                      <div className="w-12 h-12 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center mx-auto shadow-2xs">
-                        <FileSearch className="w-6 h-6" />
-                      </div>
-                      <p className="text-sm font-semibold text-slate-700">
-                        Patient {reportData.patient_name || 'N/A'} ({reportData.patient_ic || 'N/A'})
-                      </p>
-                      <p className="text-xs text-slate-500 max-w-sm">
-                        Loaded {reportData.categories.length} category panel(s) ({totalTests} test item(s)) for test date{' '}
-                        {reportData.test_date || 'N/A'}.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* AI Insights Card */}
-                <div className="bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-2xs flex flex-col justify-between">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                      <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-amber-500" />
-                        AI Health Summary
-                      </h4>
-                    </div>
-                    <div className="space-y-3 text-xs text-slate-600">
-                      <div className="p-3 bg-teal-50/50 rounded-xl border border-teal-100 space-y-1">
-                        <p className="font-semibold text-teal-900">Multi-Panel Status</p>
-                        <p className="text-slate-600">
-                          Extracted {totalTests} key metric(s) across {reportData.categories.length} panel(s).
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" /> Upload Another Report
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </>
+        {/* BULLETED LIST OF AVAILABLE MODELS */}
+        {models && (
+          <section className="max-w-2xl mx-auto bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
+              <Server className="w-5 h-5 text-teal-600" />
+              <h3 className="text-lg font-bold text-slate-900">
+                Available Models ({models.length})
+              </h3>
+            </div>
+            {models.length === 0 ? (
+              <p className="text-sm text-slate-500">No models returned by API key.</p>
+            ) : (
+              <ul className="list-disc list-inside space-y-2 text-sm font-mono text-slate-800 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                {models.map((modelName, idx) => (
+                  <li key={idx} className="py-0.5">
+                    {modelName}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         )}
       </main>
     </div>
