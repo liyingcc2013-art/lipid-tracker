@@ -21,6 +21,26 @@ export interface BloodReportData {
   categories: CategoryPanel[];
 }
 
+export function sanitizeRawText(rawText: string): string {
+  if (!rawText) return '';
+
+  let sanitized = rawText;
+
+  // 1. Strip all instances of () and ( )
+  sanitized = sanitized.replace(/\(\s*\)/g, '');
+
+  // 2. Remove all asterisk characters * attached to out-of-range numbers
+  sanitized = sanitized.replace(/\*/g, '');
+
+  // 3. Strip the specific footer text "patient's clinical findings." completely
+  sanitized = sanitized.replace(/patient's clinical findings\.?/gi, '');
+
+  // 4. Normalize excessive newlines (e.g., replace \n\n+ with a single newline)
+  sanitized = sanitized.replace(/(\r?\n){2,}/g, '\n');
+
+  return sanitized.trim();
+}
+
 function parseFallbackDate(rawText: string): string {
   // Try Collected: ... pattern first
   const collectedMatch = rawText.match(/Collected\s*[:=]?\s*([^\r\n]+)/i);
@@ -151,14 +171,16 @@ function extractBloodReportFallback(text: string): BloodReportData {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const text: string = body.text || body.rawText || '';
+    const rawInput: string = body.text || body.rawText || '';
 
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    if (!rawInput || typeof rawInput !== 'string' || rawInput.trim().length === 0) {
       return NextResponse.json(
         { error: 'No text provided for extraction.' },
         { status: 400 }
       );
     }
+
+    const text = sanitizeRawText(rawInput);
 
     const apiKey =
       process.env.GEMINI_API_KEY ||
@@ -301,8 +323,19 @@ Lab report text:
 ${text}
 """`;
 
+      const overrideCommand =
+        'CRITICAL SYSTEM OVERRIDE: The text contains multiple panels (Lipid, Liver, Kidney, Diabetes). You are strictly forbidden from terminating after the first match. You must extract every test present in the text.';
+
       const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { text: prompt },
+              { text: overrideCommand },
+            ],
+          },
+        ],
         generationConfig,
       });
       const responseText = result.response.text();
