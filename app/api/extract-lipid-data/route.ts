@@ -180,21 +180,26 @@ export async function POST(req: NextRequest) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.5-pro',
         systemInstruction:
-          'You are a strict, exhaustive medical data parser with spatial reasoning for handling disjointed and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
+          'You are a strict, exhaustive medical data parser with spatial reasoning for handling squashed and stripped 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
           'CRITICAL MANDATES:\n' +
-          '1. EXHAUSTIVE MULTI-PANEL EXTRACTION:\n' +
-          '   - You MUST iterate through the ENTIRE document from top to bottom and extract EVERY SINGLE test present.\n' +
-          '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
-          '   - Dynamically create categories based on the PDF headers (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE", "DIABETES MELLITUS PROFILE", "FULL BLOOD COUNT", etc.) and place ALL corresponding tests inside their respective categories.\n\n' +
-          '2. METADATA FILTERING & ACCURACY:\n' +
-          '   - ONLY extract the following 4 metadata fields: patient_name, patient_ic, patient_dob_or_age, test_date.\n' +
-          '   - PATIENT NAME: The patient_name is typically in ALL CAPS near the top of the report (e.g., "LEE KIM NEO ALICE"). Do NOT extract footer disclaimers, text like "\'s clinical findings", or doctor names as the patient name.\n' +
-          '   - TEST DATE: Look for the test collection date next to keywords like "Collected:" (or "Collected Date:", "Reported:"). Format as YYYY-MM-DD.\n' +
+          '1. TEST PARSING HEURISTICS:\n' +
+          '   - Test names, values, and units in the raw PDF text are merged together without spaces (e.g., "Total Cholesterol3.59mmol/L").\n' +
+          '   - You must intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:\n' +
+          '     Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".\n' +
+          '   - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L") before outputting them to JSON so value is purely numeric (e.g., 38).\n' +
+          '   - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\\n4.90mmol/L").\n' +
+          '   - Group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).\n\n' +
+          '2. METADATA HEURISTICS:\n' +
+          '   - ONLY extract the following 4 metadata fields:\n' +
+          '     - Patient Name: Find the standalone ALL CAPS name (e.g., "LEE KIM NEO ALICE") located near the top, usually near the "Page X of Y" text.\n' +
+          '     - Patient IC: Look for the standard Singapore NRIC format (e.g., starting with \'S\' and ending with a letter).\n' +
+          '     - Test Date: Find the first date in DD/MM/YY format (e.g., "26/09/26").\n' +
+          '     - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.\n' +
           '   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.\n\n' +
-          '3. PARSING & SPATIAL REASONING RULES:\n' +
-          '   - Ignore Chinese characters interleaved with English test names.\n' +
-          '   - Scan forward past Chinese characters, spaces, or newlines to find the numeric test result value, unit of measurement, and reference range.\n' +
-          '   - Maintain strict JSON schema output format.',
+          '3. STRICT RULES:\n' +
+          '   - Exhaustively read the entire document to the end.\n' +
+          '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
+          '   - Output strict JSON. Do not include Markdown formatting in the response block.',
         generationConfig: {
           temperature: 0,
           responseMimeType: 'application/json',
@@ -203,51 +208,51 @@ export async function POST(req: NextRequest) {
             properties: {
               patient_name: {
                 type: SchemaType.STRING,
-                description: 'Patient full name in ALL CAPS near top of report (e.g. "LEE KIM NEO ALICE"). Do NOT extract footer disclaimers like "\'s clinical findings."',
+                description: 'Standalone ALL CAPS name located near top, usually near "Page X of Y" text (e.g., "LEE KIM NEO ALICE").',
               },
               patient_ic: {
                 type: SchemaType.STRING,
-                description: 'Patient IC/NRIC/ID number (e.g. S0066927E)',
+                description: 'Standard Singapore NRIC format (e.g., starting with S and ending with a letter).',
               },
               patient_dob_or_age: {
                 type: SchemaType.STRING,
-                description: 'Patient date of birth or age (e.g. 1980-05-12 or 45 Y/O)',
+                description: 'Patient age or DOB extracted from strings like "77 Years" or "Female".',
               },
               test_date: {
                 type: SchemaType.STRING,
-                description: 'Test collection date located next to keywords like "Collected:", formatted as YYYY-MM-DD',
+                description: 'First date found in DD/MM/YY format (e.g., "26/09/26").',
               },
               categories: {
                 type: SchemaType.ARRAY,
-                description: 'List of ALL test categories/panels present in the document. Dynamically created based on PDF headers. Iterate through the ENTIRE document to extract EVERY test.',
+                description: 'List of ALL test categories/panels present in the document, strictly grouped under panels like LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE. Exhaustively read entire document.',
                 items: {
                   type: SchemaType.OBJECT,
                   properties: {
                     category: {
                       type: SchemaType.STRING,
-                      description: 'Category or panel header name directly from PDF headers (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
+                      description: 'Category panel header name (e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
                     },
                     tests: {
                       type: SchemaType.ARRAY,
-                      description: 'List of ALL test items under this category panel',
+                      description: 'List of test items under this category panel',
                       items: {
                         type: SchemaType.OBJECT,
                         properties: {
                           name: {
                             type: SchemaType.STRING,
-                            description: 'English name of the test item ONLY (ignore Chinese characters)',
+                            description: 'English test name extracted by splitting squashed strings or handling newlines (e.g., "Total Cholesterol" from "Total Cholesterol3.59mmol/L", "Urea" from "Urea\\n4.90mmol/L").',
                           },
                           value: {
                             type: SchemaType.NUMBER,
-                            description: 'VERY FIRST numeric value encountered when scanning forward past Chinese characters or blank spaces',
+                            description: 'Numeric test result value. Strip any leading asterisks (*) from out-of-range values (e.g., "*38U/L" -> 38).',
                           },
                           unit: {
                             type: SchemaType.STRING,
-                            description: 'Unit of measurement associated with the numeric value, e.g., mmol/L, U/L, g/L, %',
+                            description: 'Unit of measurement associated with test value (e.g., mmol/L, U/L, g/L, %).',
                           },
                           ref_range: {
                             type: SchemaType.STRING,
-                            description: 'Reference range string, e.g., < 5.20 or 10 - 50',
+                            description: 'Reference range string (e.g., <5.20 or 10-50).',
                           },
                         },
                         required: ['name', 'value', 'unit', 'ref_range'],
@@ -265,26 +270,24 @@ export async function POST(req: NextRequest) {
 
       const prompt = `Analyze the following blood test lab report text and perform an exhaustive multi-panel extraction along with strict patient metadata filtering.
 
-INSTRUCTIONS & RULES:
-1. EXHAUSTIVE MULTI-PANEL EXTRACTION:
-   - You MUST iterate through the ENTIRE document from top to bottom and extract EVERY test present across ALL panels.
-   - Do NOT stop prematurely or perform lazy extraction after one test or panel.
-   - Dynamically create category panels based on the PDF headers (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE", "DIABETES MELLITUS PROFILE", "FULL BLOOD COUNT", etc.) and place ALL corresponding tests inside them.
+1. TEST PARSING HEURISTICS:
+   - Raw PDF text has stripped spaces between test names, values, and units (e.g., "Total Cholesterol3.59mmol/L").
+   - Intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:
+     Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".
+   - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L" -> 38) before outputting to JSON.
+   - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\n4.90mmol/L").
+   - Maintain the requirement to group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).
 
-2. METADATA FILTERING & ACCURACY:
-   - Extract ONLY these 4 metadata fields:
-     1) patient_name: Typically in ALL CAPS near top of report (e.g., "LEE KIM NEO ALICE"). Do NOT extract footer text or disclaimers like "'s clinical findings."
-     2) patient_ic: Patient IC / NRIC / ID number string.
-     3) patient_dob_or_age: Patient date of birth or age.
-     4) test_date: Look for test collection date next to keywords like "Collected:". Format as YYYY-MM-DD.
+2. METADATA HEURISTICS:
+   - Patient Name: Find the standalone ALL CAPS name (e.g., "LEE KIM NEO ALICE") located near the top, usually near the "Page X of Y" text.
+   - Patient IC: Look for the standard Singapore NRIC format (e.g., starting with 'S' and ending with a letter).
+   - Test Date: Find the first date in DD/MM/YY format (e.g., "26/09/26").
+   - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.
    - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.
 
-3. PARSING & SPATIAL REASONING:
-   - Ignore Chinese characters interleaved with English test names.
-   - Scan forward past Chinese characters or blank spaces to extract the VERY FIRST numeric value, unit, and reference range.
-   - Do NOT generate synthetic data or infer missing tests.
-
-Return strict JSON conforming to the requested schema.
+3. STRICT RULES:
+   - Exhaustively read the entire document to the end.
+   - Output strict JSON matching the schema. Do not include Markdown formatting in the response block.
 
 Lab report text:
 """
