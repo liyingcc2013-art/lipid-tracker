@@ -41,133 +41,6 @@ export function sanitizeRawText(rawText: string): string {
   return sanitized.trim();
 }
 
-function parseFallbackDate(rawText: string): string {
-  // Try Collected: ... pattern first
-  const collectedMatch = rawText.match(/Collected\s*[:=]?\s*([^\r\n]+)/i);
-  const targetText = collectedMatch ? collectedMatch[1] : rawText;
-
-  // Try YYYY-MM-DD
-  const isoMatch = targetText.match(/\b(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
-  if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-  }
-
-  // Try MM/DD/YYYY or DD/MM/YYYY
-  const dateMatch = targetText.match(/\b([0-3]?\d)[-/]([0-3]?\d)[-/](20\d{2})\b/);
-  if (dateMatch) {
-    const p1 = dateMatch[1].padStart(2, '0');
-    const p2 = dateMatch[2].padStart(2, '0');
-    const year = dateMatch[3];
-    return `${year}-${p2}-${p1}`;
-  }
-
-  // Try Month DD, YYYY or DD Month YYYY
-  const monthMap: Record<string, string> = {
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-    january: '01', february: '02', march: '03', april: '04', june: '06',
-    july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
-  };
-
-  const textDateMatch = targetText.match(/\b([A-Za-z]+)\s+([0-9]{1,2}),?\s+(20\d{2})\b/i);
-  if (textDateMatch) {
-    const month = monthMap[textDateMatch[1].toLowerCase()];
-    if (month) {
-      const day = textDateMatch[2].padStart(2, '0');
-      return `${textDateMatch[3]}-${month}-${day}`;
-    }
-  }
-
-  // Fall back to entire rawText if targetText didn't match
-  if (collectedMatch) {
-    return parseFallbackDate(rawText.replace(/Collected\s*[:=]?\s*/i, ''));
-  }
-
-  return '';
-}
-
-function extractBloodReportFallback(text: string): BloodReportData {
-  // Extract Patient Name (in ALL CAPS near top, ignoring disclaimers)
-  const nameMatch = text.match(/(?:Patient\s*Name|Name|Patient)\s*[:=]?\s*([^\r\n]+)/i);
-  let patient_name = nameMatch ? nameMatch[1].trim() : '';
-  patient_name = patient_name.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:NRIC|IC|ID|Date|Sex|Gender|DOB|Age)\b.*/i, '').trim();
-  if (patient_name.toLowerCase().includes("'s clinical findings")) {
-    patient_name = '';
-  }
-
-  // Extract NRIC/IC
-  const icMatch = text.match(/\b([STFGM]\d{7}[A-Z])\b/i) || text.match(/(?:NRIC|IC|ID)\s*[:=]?\s*([A-Z0-9]+)/i);
-  const patient_ic = icMatch ? icMatch[1].trim().toUpperCase() : '';
-
-  // Extract DOB / Age
-  const dobMatch = text.match(/(?:DOB|Date of Birth|Age)\s*[:=]?\s*([^\r\n]+)/i);
-  let patient_dob_or_age = dobMatch ? dobMatch[1].trim() : '';
-  patient_dob_or_age = patient_dob_or_age.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:Sex|Gender|NRIC|IC|Date)\b.*/i, '').trim();
-
-  // Extract Test Date
-  const test_date = parseFallbackDate(text);
-
-  const categories: CategoryPanel[] = [];
-
-  // Minimal regex extraction for lipid tests strictly if present
-  const lipidTests: TestItem[] = [];
-
-  const tcMatch = text.match(/(?:Total\s+Cholesterol|Cholesterol,?\s*Total)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (tcMatch) {
-    lipidTests.push({
-      name: 'Total Cholesterol',
-      value: parseFloat(tcMatch[1]),
-      unit: tcMatch[2] || 'mmol/L',
-      ref_range: '< 5.20'
-    });
-  }
-
-  const trigMatch = text.match(/(?:Triglycerides?)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (trigMatch) {
-    lipidTests.push({
-      name: 'Triglycerides',
-      value: parseFloat(trigMatch[1]),
-      unit: trigMatch[2] || 'mmol/L',
-      ref_range: '< 1.70'
-    });
-  }
-
-  const hdlMatch = text.match(/(?:HDL\s+Cholesterol|HDL-C)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (hdlMatch) {
-    lipidTests.push({
-      name: 'HDL Cholesterol',
-      value: parseFloat(hdlMatch[1]),
-      unit: hdlMatch[2] || 'mmol/L',
-      ref_range: '> 1.00'
-    });
-  }
-
-  const ldlMatch = text.match(/(?:LDL\s+Chol\s*\(Direct\)|LDL-C|LDL\s+Cholesterol)[^\d\r\n]*(\d+(?:\.\d+)?)\s*(mmol\/L|mg\/dL)?/i);
-  if (ldlMatch) {
-    lipidTests.push({
-      name: 'LDL Chol (Direct)',
-      value: parseFloat(ldlMatch[1]),
-      unit: ldlMatch[2] || 'mmol/L',
-      ref_range: '< 2.60'
-    });
-  }
-
-  if (lipidTests.length > 0) {
-    categories.push({
-      category: 'LIPID PROFILE',
-      tests: lipidTests,
-    });
-  }
-
-  return {
-    patient_name,
-    patient_ic,
-    patient_dob_or_age,
-    test_date,
-    categories,
-  };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -191,17 +64,10 @@ export async function POST(req: NextRequest) {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 
     if (!apiKey) {
-      console.warn('GEMINI_API_KEY not found in environment. Using fallback extraction.');
-      const fallbackData = extractBloodReportFallback(sanitizedText);
-      return NextResponse.json({
-        success: true,
-        extracted_by: 'fallback',
-        ...fallbackData,
-      });
+      throw new Error('GEMINI_API_KEY not found in environment.');
     }
 
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
+    const genAI = new GoogleGenerativeAI(apiKey);
 
       const generationConfig: GenerationConfig = {
         temperature: 0,
@@ -271,7 +137,7 @@ export async function POST(req: NextRequest) {
       };
 
       const model = genAI.getGenerativeModel({
-        model: 'gemini-2.5-pro',
+        model: 'gemini-3.1-pro-preview',
         systemInstruction:
           'You are a strict, exhaustive medical data parser with spatial reasoning for handling squashed and stripped 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
           'CRITICAL MANDATES:\n' +
@@ -365,15 +231,6 @@ ${sanitizedText}
         extracted_by: 'gemini',
         ...reportData,
       });
-    } catch (aiError) {
-      console.error('Gemini API extraction failed, using fallback parser:', aiError);
-      const fallbackData = extractBloodReportFallback(sanitizedText);
-      return NextResponse.json({
-        success: true,
-        extracted_by: 'fallback',
-        ...fallbackData,
-      });
-    }
   } catch (err: unknown) {
     console.error('Error in extract-lipid-data route:', err);
     const errorMessage =
