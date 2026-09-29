@@ -50,6 +50,7 @@ export interface CategoryPanel {
 export interface BloodReportData {
   patient_name: string;
   patient_ic: string;
+  patient_dob_or_age: string;
   test_date: string;
   categories: CategoryPanel[];
 }
@@ -186,6 +187,7 @@ export default function Home() {
         setReportData({
           patient_name: extractJson.patient_name || '',
           patient_ic: extractJson.patient_ic || '',
+          patient_dob_or_age: extractJson.patient_dob_or_age || '',
           test_date: extractJson.test_date || '',
           categories: extractJson.categories || [],
         });
@@ -462,7 +464,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
                 <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
                   <User className="w-5 h-5 text-teal-400 shrink-0" />
                   <div>
@@ -476,6 +478,14 @@ export default function Home() {
                   <div>
                     <p className="text-[11px] font-medium text-slate-400">Patient IC / NRIC</p>
                     <p className="text-sm font-semibold text-slate-100">{reportData.patient_ic || 'N/A'}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">
+                  <Calendar className="w-5 h-5 text-teal-400 shrink-0" />
+                  <div>
+                    <p className="text-[11px] font-medium text-slate-400">DOB / Age</p>
+                    <p className="text-sm font-semibold text-slate-100">{reportData.patient_dob_or_age || 'N/A'}</p>
                   </div>
                 </div>
 
