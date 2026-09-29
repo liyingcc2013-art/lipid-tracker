@@ -16,19 +16,24 @@ export interface CategoryPanel {
 export interface BloodReportData {
   patient_name: string;
   patient_ic: string;
+  patient_dob_or_age: string;
   test_date: string;
   categories: CategoryPanel[];
 }
 
 function parseFallbackDate(rawText: string): string {
+  // Try Collected: ... pattern first
+  const collectedMatch = rawText.match(/Collected\s*[:=]?\s*([^\r\n]+)/i);
+  const targetText = collectedMatch ? collectedMatch[1] : rawText;
+
   // Try YYYY-MM-DD
-  const isoMatch = rawText.match(/\b(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
+  const isoMatch = targetText.match(/\b(20\d{2})[-/](0[1-9]|1[0-2])[-/](0[1-9]|[12]\d|3[01])\b/);
   if (isoMatch) {
     return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   }
 
   // Try MM/DD/YYYY or DD/MM/YYYY
-  const dateMatch = rawText.match(/\b([0-3]?\d)[-/]([0-3]?\d)[-/](20\d{2})\b/);
+  const dateMatch = targetText.match(/\b([0-3]?\d)[-/]([0-3]?\d)[-/](20\d{2})\b/);
   if (dateMatch) {
     const p1 = dateMatch[1].padStart(2, '0');
     const p2 = dateMatch[2].padStart(2, '0');
@@ -44,7 +49,7 @@ function parseFallbackDate(rawText: string): string {
     july: '07', august: '08', september: '09', october: '10', november: '11', december: '12'
   };
 
-  const textDateMatch = rawText.match(/\b([A-Za-z]+)\s+([0-9]{1,2}),?\s+(20\d{2})\b/i);
+  const textDateMatch = targetText.match(/\b([A-Za-z]+)\s+([0-9]{1,2}),?\s+(20\d{2})\b/i);
   if (textDateMatch) {
     const month = monthMap[textDateMatch[1].toLowerCase()];
     if (month) {
@@ -53,18 +58,31 @@ function parseFallbackDate(rawText: string): string {
     }
   }
 
+  // Fall back to entire rawText if targetText didn't match
+  if (collectedMatch) {
+    return parseFallbackDate(rawText.replace(/Collected\s*[:=]?\s*/i, ''));
+  }
+
   return '';
 }
 
 function extractBloodReportFallback(text: string): BloodReportData {
-  // Extract Patient Name
+  // Extract Patient Name (in ALL CAPS near top, ignoring disclaimers)
   const nameMatch = text.match(/(?:Patient\s*Name|Name|Patient)\s*[:=]?\s*([^\r\n]+)/i);
   let patient_name = nameMatch ? nameMatch[1].trim() : '';
-  patient_name = patient_name.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:NRIC|IC|ID|Date|Sex|Gender|DOB)\b.*/i, '').trim();
+  patient_name = patient_name.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:NRIC|IC|ID|Date|Sex|Gender|DOB|Age)\b.*/i, '').trim();
+  if (patient_name.toLowerCase().includes("'s clinical findings")) {
+    patient_name = '';
+  }
 
   // Extract NRIC/IC
   const icMatch = text.match(/\b([STFGM]\d{7}[A-Z])\b/i) || text.match(/(?:NRIC|IC|ID)\s*[:=]?\s*([A-Z0-9]+)/i);
   const patient_ic = icMatch ? icMatch[1].trim().toUpperCase() : '';
+
+  // Extract DOB / Age
+  const dobMatch = text.match(/(?:DOB|Date of Birth|Age)\s*[:=]?\s*([^\r\n]+)/i);
+  let patient_dob_or_age = dobMatch ? dobMatch[1].trim() : '';
+  patient_dob_or_age = patient_dob_or_age.replace(/[\u4e00-\u9fa5]/g, '').replace(/\b(?:Sex|Gender|NRIC|IC|Date)\b.*/i, '').trim();
 
   // Extract Test Date
   const test_date = parseFallbackDate(text);
@@ -124,6 +142,7 @@ function extractBloodReportFallback(text: string): BloodReportData {
   return {
     patient_name,
     patient_ic,
+    patient_dob_or_age,
     test_date,
     categories,
   };
@@ -161,11 +180,21 @@ export async function POST(req: NextRequest) {
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.5-pro',
         systemInstruction:
-          'You are a strict medical data parser with spatial reasoning for handling disjointed and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it.\n\n' +
-          'CRITICAL PARSING & SPATIAL REASONING RULES:\n' +
-          '1. PATIENT NAME: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings." or disclaimers.\n' +
-          '2. TEST DATE: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.\n' +
-          '3. TEST RESULTS: Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters. You MUST find the English test name, scan forward past any Chinese characters, newlines, or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.',
+          'You are a strict, exhaustive medical data parser with spatial reasoning for handling disjointed and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
+          'CRITICAL MANDATES:\n' +
+          '1. EXHAUSTIVE MULTI-PANEL EXTRACTION:\n' +
+          '   - You MUST iterate through the ENTIRE document from top to bottom and extract EVERY SINGLE test present.\n' +
+          '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
+          '   - Dynamically create categories based on the PDF headers (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE", "DIABETES MELLITUS PROFILE", "FULL BLOOD COUNT", etc.) and place ALL corresponding tests inside their respective categories.\n\n' +
+          '2. METADATA FILTERING & ACCURACY:\n' +
+          '   - ONLY extract the following 4 metadata fields: patient_name, patient_ic, patient_dob_or_age, test_date.\n' +
+          '   - PATIENT NAME: The patient_name is typically in ALL CAPS near the top of the report (e.g., "LEE KIM NEO ALICE"). Do NOT extract footer disclaimers, text like "\'s clinical findings", or doctor names as the patient name.\n' +
+          '   - TEST DATE: Look for the test collection date next to keywords like "Collected:" (or "Collected Date:", "Reported:"). Format as YYYY-MM-DD.\n' +
+          '   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.\n\n' +
+          '3. PARSING & SPATIAL REASONING RULES:\n' +
+          '   - Ignore Chinese characters interleaved with English test names.\n' +
+          '   - Scan forward past Chinese characters, spaces, or newlines to find the numeric test result value, unit of measurement, and reference range.\n' +
+          '   - Maintain strict JSON schema output format.',
         generationConfig: {
           temperature: 0,
           responseMimeType: 'application/json',
@@ -174,29 +203,33 @@ export async function POST(req: NextRequest) {
             properties: {
               patient_name: {
                 type: SchemaType.STRING,
-                description: 'Patient full name in ALL CAPS usually found near top near I/C number or age/gender. Do NOT extract footer text like "\'s clinical findings."',
+                description: 'Patient full name in ALL CAPS near top of report (e.g. "LEE KIM NEO ALICE"). Do NOT extract footer disclaimers like "\'s clinical findings."',
               },
               patient_ic: {
                 type: SchemaType.STRING,
-                description: 'Patient IC/NRIC/ID number, e.g., S0066927E',
+                description: 'Patient IC/NRIC/ID number (e.g. S0066927E)',
+              },
+              patient_dob_or_age: {
+                type: SchemaType.STRING,
+                description: 'Patient date of birth or age (e.g. 1980-05-12 or 45 Y/O)',
               },
               test_date: {
                 type: SchemaType.STRING,
-                description: 'Date following keywords like "Collected:" or "Reported:" formatted as YYYY-MM-DD',
+                description: 'Test collection date located next to keywords like "Collected:", formatted as YYYY-MM-DD',
               },
               categories: {
                 type: SchemaType.ARRAY,
-                description: 'List of test categories/panels actively searched (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
+                description: 'List of ALL test categories/panels present in the document. Dynamically created based on PDF headers. Iterate through the ENTIRE document to extract EVERY test.',
                 items: {
                   type: SchemaType.OBJECT,
                   properties: {
                     category: {
                       type: SchemaType.STRING,
-                      description: 'Category or panel name, e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE',
+                      description: 'Category or panel header name directly from PDF headers (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
                     },
                     tests: {
                       type: SchemaType.ARRAY,
-                      description: 'List of test items under this category using scan-forward method',
+                      description: 'List of ALL test items under this category panel',
                       items: {
                         type: SchemaType.OBJECT,
                         properties: {
@@ -225,37 +258,31 @@ export async function POST(req: NextRequest) {
                 },
               },
             },
-            required: ['patient_name', 'patient_ic', 'test_date', 'categories'],
+            required: ['patient_name', 'patient_ic', 'patient_dob_or_age', 'test_date', 'categories'],
           },
         },
       });
 
-      const prompt = `Analyze the following blood test lab report text and extract complete multi-panel test metrics along with patient metadata.
+      const prompt = `Analyze the following blood test lab report text and perform an exhaustive multi-panel extraction along with strict patient metadata filtering.
 
-INSTRUCTIONS & RULES FOR DISJOINTED 1D SCRAMBLED TEXT:
-1. Patient Metadata:
-   - Extract patient_name: The patient name usually appears in ALL CAPS near the top of the text, often near the I/C number or age/gender. Do NOT extract footer text like "'s clinical findings."
-   - Extract patient_ic (string).
-   - Extract test_date: Look for the date following keywords like "Collected:" or "Reported:". Format as YYYY-MM-DD.
+INSTRUCTIONS & RULES:
+1. EXHAUSTIVE MULTI-PANEL EXTRACTION:
+   - You MUST iterate through the ENTIRE document from top to bottom and extract EVERY test present across ALL panels.
+   - Do NOT stop prematurely or perform lazy extraction after one test or panel.
+   - Dynamically create category panels based on the PDF headers (e.g., "LIPID PROFILE", "LIVER PROFILE", "KIDNEY PROFILE", "DIABETES MELLITUS PROFILE", "FULL BLOOD COUNT", etc.) and place ALL corresponding tests inside them.
 
-2. Multi-Panel & Spatial Reasoning Extraction Rules:
-   - Actively search for all panels present in the report, including LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE, and any other panels.
-   - Extract all associated tests within these panels using spatial reasoning for scrambled 1D text.
-   - Due to PDF extraction, values might be separated from test names by spaces, newlines, or Chinese characters.
-   - You must find the English test name, scan forward past any Chinese characters or blank spaces, and extract the VERY FIRST numeric value and unit you encounter.
-   - You MUST NOT generate synthetic data, infer, or hallucinate missing tests.
-   - Extract ONLY tests explicitly present in the text.
+2. METADATA FILTERING & ACCURACY:
+   - Extract ONLY these 4 metadata fields:
+     1) patient_name: Typically in ALL CAPS near top of report (e.g., "LEE KIM NEO ALICE"). Do NOT extract footer text or disclaimers like "'s clinical findings."
+     2) patient_ic: Patient IC / NRIC / ID number string.
+     3) patient_dob_or_age: Patient date of birth or age.
+     4) test_date: Look for test collection date next to keywords like "Collected:". Format as YYYY-MM-DD.
+   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.
 
-3. Dynamic Test Categories:
-   - Group all extracted tests into their respective panel categories (e.g. LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).
-   - Return an array of categories, each containing:
-     - category: Name of the test panel/category
-     - tests: Array of test items under that category.
-       Each test item must have:
-       - name: string (English name only)
-       - value: number (VERY FIRST numeric value encountered after scanning forward)
-       - unit: string
-       - ref_range: string
+3. PARSING & SPATIAL REASONING:
+   - Ignore Chinese characters interleaved with English test names.
+   - Scan forward past Chinese characters or blank spaces to extract the VERY FIRST numeric value, unit, and reference range.
+   - Do NOT generate synthetic data or infer missing tests.
 
 Return strict JSON conforming to the requested schema.
 
@@ -278,6 +305,7 @@ ${text}
       const reportData: BloodReportData = {
         patient_name: String(parsedJson.patient_name || ''),
         patient_ic: String(parsedJson.patient_ic || ''),
+        patient_dob_or_age: String(parsedJson.patient_dob_or_age || ''),
         test_date: String(parsedJson.test_date || ''),
         categories: Array.isArray(parsedJson.categories) ? parsedJson.categories : [],
       };
