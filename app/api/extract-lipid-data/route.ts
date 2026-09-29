@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, GenerationConfig } from '@google/generative-ai';
 
 export interface TestItem {
   name: string;
@@ -177,6 +177,74 @@ export async function POST(req: NextRequest) {
 
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
+
+      const generationConfig: GenerationConfig = {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: SchemaType.OBJECT,
+          properties: {
+            patient_name: {
+              type: SchemaType.STRING,
+              description: 'Standalone ALL CAPS name located near top, usually near "Page X of Y" text (e.g., "LEE KIM NEO ALICE").',
+            },
+            patient_ic: {
+              type: SchemaType.STRING,
+              description: 'Standard Singapore NRIC format (e.g., starting with S and ending with a letter).',
+            },
+            patient_dob_or_age: {
+              type: SchemaType.STRING,
+              description: 'Patient age or DOB extracted from strings like "77 Years" or "Female".',
+            },
+            test_date: {
+              type: SchemaType.STRING,
+              description: 'First date found in DD/MM/YY format (e.g., "26/09/26").',
+            },
+            categories: {
+              type: SchemaType.ARRAY,
+              description: 'List of ALL test categories/panels present in the document, strictly grouped under panels like LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE. Exhaustively read entire document.',
+              items: {
+                type: SchemaType.OBJECT,
+                properties: {
+                  category: {
+                    type: SchemaType.STRING,
+                    description: 'Category panel header name (e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
+                  },
+                  tests: {
+                    type: SchemaType.ARRAY,
+                    description: 'List of test items under this category panel',
+                    items: {
+                      type: SchemaType.OBJECT,
+                      properties: {
+                        name: {
+                          type: SchemaType.STRING,
+                          description: 'English test name extracted by splitting squashed strings or handling newlines (e.g., "Total Cholesterol" from "Total Cholesterol3.59mmol/L", "Urea\\n4.90mmol/L").',
+                        },
+                        value: {
+                          type: SchemaType.NUMBER,
+                          description: 'Numeric test result value. Strip any leading asterisks (*) from out-of-range values (e.g., "*38U/L" -> 38).',
+                        },
+                        unit: {
+                          type: SchemaType.STRING,
+                          description: 'Unit of measurement associated with test value (e.g., mmol/L, U/L, g/L, %).',
+                        },
+                        ref_range: {
+                          type: SchemaType.STRING,
+                          description: 'Reference range string (e.g., <5.20 or 10-50).',
+                        },
+                      },
+                      required: ['name', 'value', 'unit', 'ref_range'],
+                    },
+                  },
+                },
+                required: ['category', 'tests'],
+              },
+            },
+          },
+          required: ['patient_name', 'patient_ic', 'patient_dob_or_age', 'test_date', 'categories'],
+        },
+      };
+
       const model = genAI.getGenerativeModel({
         model: 'gemini-2.5-pro',
         systemInstruction:
@@ -186,6 +254,7 @@ export async function POST(req: NextRequest) {
           '   - Test names, values, and units in the raw PDF text are merged together without spaces (e.g., "Total Cholesterol3.59mmol/L").\n' +
           '   - You must intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:\n' +
           '     Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".\n' +
+          '   - Test names and values are often separated by newlines and empty parentheses. For example, \'HDL Cholesterol\\n()\\n1.54mmol/L\' maps to Name: \'HDL Cholesterol\', Value: 1.54, Unit: \'mmol/L\'. You must scan across these breaks to connect the test with its value.\n' +
           '   - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L") before outputting them to JSON so value is purely numeric (e.g., 38).\n' +
           '   - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\\n4.90mmol/L").\n' +
           '   - Group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).\n\n' +
@@ -196,76 +265,12 @@ export async function POST(req: NextRequest) {
           '     - Test Date: Find the first date in DD/MM/YY format (e.g., "26/09/26").\n' +
           '     - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.\n' +
           '   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.\n\n' +
-          '3. STRICT RULES:\n' +
+          '3. STRICT RULES & EXHAUSTIVE ENFORCEMENT:\n' +
+          '   - You must extract EVERY test from the raw text. Do not stop after the first panel. Populate the Lipid, Liver, Kidney, and Diabetes profiles fully.\n' +
           '   - Exhaustively read the entire document to the end.\n' +
           '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
           '   - Output strict JSON. Do not include Markdown formatting in the response block.',
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: SchemaType.OBJECT,
-            properties: {
-              patient_name: {
-                type: SchemaType.STRING,
-                description: 'Standalone ALL CAPS name located near top, usually near "Page X of Y" text (e.g., "LEE KIM NEO ALICE").',
-              },
-              patient_ic: {
-                type: SchemaType.STRING,
-                description: 'Standard Singapore NRIC format (e.g., starting with S and ending with a letter).',
-              },
-              patient_dob_or_age: {
-                type: SchemaType.STRING,
-                description: 'Patient age or DOB extracted from strings like "77 Years" or "Female".',
-              },
-              test_date: {
-                type: SchemaType.STRING,
-                description: 'First date found in DD/MM/YY format (e.g., "26/09/26").',
-              },
-              categories: {
-                type: SchemaType.ARRAY,
-                description: 'List of ALL test categories/panels present in the document, strictly grouped under panels like LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE. Exhaustively read entire document.',
-                items: {
-                  type: SchemaType.OBJECT,
-                  properties: {
-                    category: {
-                      type: SchemaType.STRING,
-                      description: 'Category panel header name (e.g., LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE)',
-                    },
-                    tests: {
-                      type: SchemaType.ARRAY,
-                      description: 'List of test items under this category panel',
-                      items: {
-                        type: SchemaType.OBJECT,
-                        properties: {
-                          name: {
-                            type: SchemaType.STRING,
-                            description: 'English test name extracted by splitting squashed strings or handling newlines (e.g., "Total Cholesterol" from "Total Cholesterol3.59mmol/L", "Urea" from "Urea\\n4.90mmol/L").',
-                          },
-                          value: {
-                            type: SchemaType.NUMBER,
-                            description: 'Numeric test result value. Strip any leading asterisks (*) from out-of-range values (e.g., "*38U/L" -> 38).',
-                          },
-                          unit: {
-                            type: SchemaType.STRING,
-                            description: 'Unit of measurement associated with test value (e.g., mmol/L, U/L, g/L, %).',
-                          },
-                          ref_range: {
-                            type: SchemaType.STRING,
-                            description: 'Reference range string (e.g., <5.20 or 10-50).',
-                          },
-                        },
-                        required: ['name', 'value', 'unit', 'ref_range'],
-                      },
-                    },
-                  },
-                  required: ['category', 'tests'],
-                },
-              },
-            },
-            required: ['patient_name', 'patient_ic', 'patient_dob_or_age', 'test_date', 'categories'],
-          },
-        },
+        generationConfig,
       });
 
       const prompt = `Analyze the following blood test lab report text and perform an exhaustive multi-panel extraction along with strict patient metadata filtering.
@@ -274,6 +279,7 @@ export async function POST(req: NextRequest) {
    - Raw PDF text has stripped spaces between test names, values, and units (e.g., "Total Cholesterol3.59mmol/L").
    - Intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:
      Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".
+   - Test names and values are often separated by newlines and empty parentheses. For example, 'HDL Cholesterol\n()\n1.54mmol/L' maps to Name: 'HDL Cholesterol', Value: 1.54, Unit: 'mmol/L'. You must scan across these breaks to connect the test with its value.
    - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L" -> 38) before outputting to JSON.
    - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\n4.90mmol/L").
    - Maintain the requirement to group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).
@@ -285,7 +291,8 @@ export async function POST(req: NextRequest) {
    - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.
    - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.
 
-3. STRICT RULES:
+3. STRICT RULES & EXHAUSTIVE ENFORCEMENT:
+   - You must extract EVERY test from the raw text. Do not stop after the first panel. Populate the Lipid, Liver, Kidney, and Diabetes profiles fully.
    - Exhaustively read the entire document to the end.
    - Output strict JSON matching the schema. Do not include Markdown formatting in the response block.
 
@@ -294,7 +301,10 @@ Lab report text:
 ${text}
 """`;
 
-      const result = await model.generateContent(prompt);
+      const result = await model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig,
+      });
       const responseText = result.response.text();
 
       // Clean response string if wrapped in markdown code block
