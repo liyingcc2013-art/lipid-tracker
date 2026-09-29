@@ -171,16 +171,19 @@ function extractBloodReportFallback(text: string): BloodReportData {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const rawInput: string = body.text || body.rawText || '';
+    const rawText: string = body.text || body.rawText || '';
 
-    if (!rawInput || typeof rawInput !== 'string' || rawInput.trim().length === 0) {
+    if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
       return NextResponse.json(
         { error: 'No text provided for extraction.' },
         { status: 400 }
       );
     }
 
-    const text = sanitizeRawText(rawInput);
+    console.log("--- 1. RAW PDF TEXT ---", rawText);
+
+    const sanitizedText = sanitizeRawText(rawText);
+    console.log("--- 2. SANITIZED TEXT ---", sanitizedText);
 
     const apiKey =
       process.env.GEMINI_API_KEY ||
@@ -189,7 +192,7 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       console.warn('GEMINI_API_KEY not found in environment. Using fallback extraction.');
-      const fallbackData = extractBloodReportFallback(text);
+      const fallbackData = extractBloodReportFallback(sanitizedText);
       return NextResponse.json({
         success: true,
         extracted_by: 'fallback',
@@ -320,7 +323,7 @@ export async function POST(req: NextRequest) {
 
 Lab report text:
 """
-${text}
+${sanitizedText}
 """`;
 
       const overrideCommand =
@@ -339,6 +342,7 @@ ${text}
         generationConfig,
       });
       const responseText = result.response.text();
+      console.log("--- 3. GEMINI RESPONSE ---", responseText);
 
       // Clean response string if wrapped in markdown code block
       const cleanedJsonText = responseText
@@ -363,7 +367,7 @@ ${text}
       });
     } catch (aiError) {
       console.error('Gemini API extraction failed, using fallback parser:', aiError);
-      const fallbackData = extractBloodReportFallback(text);
+      const fallbackData = extractBloodReportFallback(sanitizedText);
       return NextResponse.json({
         success: true,
         extracted_by: 'fallback',
