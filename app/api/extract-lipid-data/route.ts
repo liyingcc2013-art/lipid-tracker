@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-pro-latest',
+      model: 'gemini-1.5-pro',
       systemInstruction:
         'You are a strict medical data parser with spatial reasoning for handling disjointed, squashed, and scrambled 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data. Extract ONLY values explicitly present in the provided raw text. If a test or value is missing, you MUST omit it.\n\n' +
         'CRITICAL PARSING & SPATIAL REASONING RULES:\n' +
