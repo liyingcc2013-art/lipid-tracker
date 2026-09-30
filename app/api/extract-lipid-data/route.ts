@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
       };
 
       const model = genAI.getGenerativeModel({
-        model: 'gemini-3.1-pro-preview',
+        model: 'gemini-3.5-flash',
         systemInstruction:
           'You are a strict, exhaustive medical data parser with spatial reasoning for handling squashed and stripped 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
           'CRITICAL MANDATES:\n' +
