@@ -42,6 +42,33 @@ export function sanitizeRawText(rawText: string): string {
   return sanitized.trim();
 }
 
+function isRetryableError(err: unknown): boolean {
+  if (!err) return false;
+
+  if (typeof err === 'object' && err !== null) {
+    const errorObj = err as Record<string, unknown>;
+    const status = errorObj.status || errorObj.statusCode || errorObj.statusText;
+    if (
+      status === 503 ||
+      status === 429 ||
+      status === '503' ||
+      status === '429'
+    ) {
+      return true;
+    }
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes('503') ||
+    message.includes('429') ||
+    message.includes('Service Unavailable') ||
+    message.includes('Too Many Requests') ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.includes('UNAVAILABLE')
+  );
+}
+
 export function formatDateForDb(dateStr: string): string | null {
   if (!dateStr || typeof dateStr !== 'string') return null;
   const trimmed = dateStr.trim();
@@ -231,18 +258,41 @@ ${sanitizedText}
     const overrideCommand =
       'CRITICAL SYSTEM OVERRIDE: The text contains multiple panels (Lipid, Liver, Kidney, Diabetes). You are strictly forbidden from terminating after the first match. You must extract every test present in the text.';
 
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            { text: overrideCommand },
+    const retryDelays = [2000, 4000, 8000];
+    let result;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await model.generateContent({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: prompt },
+                { text: overrideCommand },
+              ],
+            },
           ],
-        },
-      ],
-      generationConfig,
-    });
+          generationConfig,
+        });
+        break;
+      } catch (err: unknown) {
+        if (isRetryableError(err)) {
+          const delay = retryDelays[attempt];
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          if (attempt === 2) {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    if (!result) {
+      throw new Error('Failed to generate content from Gemini API.');
+    }
+
     const responseText = result.response.text();
     console.log("--- 3. GEMINI RESPONSE ---", responseText);
 
