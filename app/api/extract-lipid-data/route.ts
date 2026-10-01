@@ -338,8 +338,32 @@ ${sanitizedText}
     }
 
     if (patientId) {
-      // 2. Insert lab result row referencing patient_id
       const formattedDate = formatDateForDb(reportData.test_date);
+
+      if (formattedDate) {
+        const { data: existingRecords, error: existingError } = await supabase
+          .from('lab_results')
+          .select('id')
+          .eq('patient_id', patientId)
+          .eq('test_date', formattedDate);
+
+        if (existingError) {
+          console.error('Error querying existing lab results in Supabase:', existingError);
+        } else if (existingRecords && existingRecords.length > 0) {
+          return NextResponse.json(
+            {
+              duplicate: true,
+              message: `A blood test done on ${reportData.test_date} has been detected in the records.`,
+              patient_id: patientId,
+              extracted_data: reportData,
+              ...reportData,
+            },
+            { status: 409 }
+          );
+        }
+      }
+
+      // 2. Insert lab result row referencing patient_id
       const { data: labData, error: labError } = await supabase
         .from('lab_results')
         .insert({
