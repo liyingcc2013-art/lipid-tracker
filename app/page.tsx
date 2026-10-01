@@ -116,6 +116,11 @@ export default function Home() {
   const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
+  // Duplicate modal states
+  const [showDuplicateModal, setShowDuplicateModal] = useState<boolean>(false);
+  const [duplicateData, setDuplicateData] = useState<BloodReportData | null>(null);
+  const [isForceSaving, setIsForceSaving] = useState<boolean>(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
@@ -180,6 +185,19 @@ export default function Home() {
 
         const extractJson = await extractRes.json();
 
+        if (extractRes.status === 409) {
+          const extractedObj: BloodReportData = {
+            patient_name: extractJson.patient_name || extractJson.extracted_data?.patient_name || '',
+            patient_ic: extractJson.patient_ic || extractJson.extracted_data?.patient_ic || '',
+            patient_dob_or_age: extractJson.patient_dob_or_age || extractJson.extracted_data?.patient_dob_or_age || '',
+            test_date: extractJson.test_date || extractJson.extracted_data?.test_date || '',
+            categories: extractJson.categories || extractJson.extracted_data?.categories || [],
+          };
+          setDuplicateData(extractedObj);
+          setShowDuplicateModal(true);
+          return;
+        }
+
         if (!extractRes.ok) {
           throw new Error(extractJson.error || 'Failed to extract report data.');
         }
@@ -234,6 +252,59 @@ export default function Home() {
     setReportData(null);
     setExtractionMethod(null);
     setError(null);
+    setShowDuplicateModal(false);
+    setDuplicateData(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleConfirmForceSave = async () => {
+    if (!duplicateData) return;
+    setIsForceSaving(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/save-duplicate-record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(duplicateData),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to save duplicate record.');
+      }
+
+      setReportData({
+        patient_name: json.patient_name || duplicateData.patient_name,
+        patient_ic: json.patient_ic || duplicateData.patient_ic,
+        patient_dob_or_age: json.patient_dob_or_age || duplicateData.patient_dob_or_age,
+        test_date: json.test_date || duplicateData.test_date,
+        categories: json.categories || duplicateData.categories,
+      });
+      setExtractionMethod('gemini');
+      setShowDuplicateModal(false);
+      setDuplicateData(null);
+    } catch (err: unknown) {
+      console.error('Error force saving duplicate:', err);
+      const msg = err instanceof Error ? err.message : 'Error force saving record.';
+      setError(msg);
+      setShowDuplicateModal(false);
+    } finally {
+      setIsForceSaving(false);
+    }
+  };
+
+  const handleCancelDuplicate = () => {
+    setShowDuplicateModal(false);
+    setDuplicateData(null);
+    setFile(null);
+    setExtractedText(null);
+    setNumPages(null);
+    setReportData(null);
+    setExtractionMethod(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -673,6 +744,70 @@ export default function Home() {
           </>
         )}
       </main>
+
+      {/* DUPLICATE CONFIRMATION MODAL */}
+      {showDuplicateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 transform transition-all">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-100 text-amber-700 rounded-2xl shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-slate-900">
+                  Duplicate Blood Test Detected
+                </h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  A blood test done on{' '}
+                  <span className="font-semibold text-slate-900">
+                    {duplicateData?.test_date || 'this date'}
+                  </span>{' '}
+                  has been detected in the records, do you still want to proceed?
+                </p>
+              </div>
+            </div>
+
+            {duplicateData?.patient_name && (
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1 text-slate-600">
+                <p>
+                  <span className="font-semibold text-slate-800">Patient:</span>{' '}
+                  {duplicateData.patient_name} ({duplicateData.patient_ic || 'N/A'})
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-800">Test Date:</span>{' '}
+                  {duplicateData.test_date || 'N/A'}
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleCancelDuplicate}
+                disabled={isForceSaving}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmForceSave}
+                disabled={isForceSaving}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
+              >
+                {isForceSaving ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Yes'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
