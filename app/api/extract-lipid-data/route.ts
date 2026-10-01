@@ -199,33 +199,30 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3.6-flash',
-      systemInstruction:
-        'You are a strict, exhaustive medical data parser with spatial reasoning for handling squashed and stripped 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
-        'CRITICAL MANDATES:\n' +
-        '1. TEST PARSING HEURISTICS:\n' +
-        '   - Test names, values, and units in the raw PDF text are merged together without spaces (e.g., "Total Cholesterol3.59mmol/L").\n' +
-        '   - You must intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:\n' +
-        '     Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".\n' +
-        '   - Test names and values are often separated by newlines and empty parentheses. For example, \'HDL Cholesterol\\n()\\n1.54mmol/L\' maps to Name: \'HDL Cholesterol\', Value: 1.54, Unit: \'mmol/L\'. You must scan across these breaks to connect the test with its value.\n' +
-        '   - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L") before outputting them to JSON so value is purely numeric (e.g., 38).\n' +
-        '   - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\\n4.90mmol/L").\n' +
-        '   - Group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).\n\n' +
-        '2. METADATA HEURISTICS:\n' +
-        '   - ONLY extract the following 4 metadata fields:\n' +
-        '     - Patient Name: Find the standalone ALL CAPS name (e.g., "LEE KIM NEO ALICE") located near the top, usually near the "Page X of Y" text.\n' +
-        '     - Patient IC: Look for the standard Singapore NRIC format (e.g., starting with \'S\' and ending with a letter).\n' +
-        '     - Test Date: Find the first date in DD/MM/YY format (e.g., "26/09/26").\n' +
-        '     - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.\n' +
-        '   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.\n\n' +
-        '3. STRICT RULES & EXHAUSTIVE ENFORCEMENT:\n' +
-        '   - You must extract EVERY test from the raw text. Do not stop after the first panel. Populate the Lipid, Liver, Kidney, and Diabetes profiles fully.\n' +
-        '   - Exhaustively read the entire document to the end.\n' +
-        '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
-        '   - Output strict JSON. Do not include Markdown formatting in the response block.',
-      generationConfig,
-    });
+    const models = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-1.5-pro'];
+    const systemInstruction =
+      'You are a strict, exhaustive medical data parser with spatial reasoning for handling squashed and stripped 1D PDF text output. You MUST NOT hallucinate, infer, or generate synthetic data.\n\n' +
+      'CRITICAL MANDATES:\n' +
+      '1. TEST PARSING HEURISTICS:\n' +
+      '   - Test names, values, and units in the raw PDF text are merged together without spaces (e.g., "Total Cholesterol3.59mmol/L").\n' +
+      '   - You must intelligently split squashed strings like "Total Cholesterol3.59mmol/L(<5.20)139mg/dL(<200)" into:\n' +
+      '     Name: "Total Cholesterol", Value: 3.59, Unit: "mmol/L".\n' +
+      '   - Test names and values are often separated by newlines and empty parentheses. For example, \'HDL Cholesterol\\n()\\n1.54mmol/L\' maps to Name: \'HDL Cholesterol\', Value: 1.54, Unit: \'mmol/L\'. You must scan across these breaks to connect the test with its value.\n' +
+      '   - Strip any leading asterisks (*) from out-of-range numeric values (e.g., "*38U/L") before outputting them to JSON so value is purely numeric (e.g., 38).\n' +
+      '   - Handle cases where the test name is separated from the value by a newline (e.g., "Urea\\n4.90mmol/L").\n' +
+      '   - Group tests strictly under their respective panels (LIPID PROFILE, LIVER PROFILE, KIDNEY PROFILE, DIABETES MELLITUS PROFILE).\n\n' +
+      '2. METADATA HEURISTICS:\n' +
+      '   - ONLY extract the following 4 metadata fields:\n' +
+      '     - Patient Name: Find the standalone ALL CAPS name (e.g., "LEE KIM NEO ALICE") located near the top, usually near the "Page X of Y" text.\n' +
+      '     - Patient IC: Look for the standard Singapore NRIC format (e.g., starting with \'S\' and ending with a letter).\n' +
+      '     - Test Date: Find the first date in DD/MM/YY format (e.g., "26/09/26").\n' +
+      '     - Patient Age/DOB: Look for strings like "77 Years" or "Female" and extract the age.\n' +
+      '   - STRICT EXCLUSION: Explicitly IGNORE and omit all information regarding ordering doctors, clinic addresses, clinic names, lab details, and facility addresses.\n\n' +
+      '3. STRICT RULES & EXHAUSTIVE ENFORCEMENT:\n' +
+      '   - You must extract EVERY test from the raw text. Do not stop after the first panel. Populate the Lipid, Liver, Kidney, and Diabetes profiles fully.\n' +
+      '   - Exhaustively read the entire document to the end.\n' +
+      '   - Do NOT perform lazy extraction or stop after extracting only one test or panel.\n' +
+      '   - Output strict JSON. Do not include Markdown formatting in the response block.';
 
     const prompt = `Analyze the following blood test lab report text and perform an exhaustive multi-panel extraction along with strict patient metadata filtering.
 
@@ -260,37 +257,55 @@ ${sanitizedText}
 
     const retryDelays = [2000, 4000, 8000];
     let result;
+    let lastError: unknown = null;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        result = await model.generateContent({
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: prompt },
-                { text: overrideCommand },
-              ],
-            },
-          ],
-          generationConfig,
-        });
-        break;
-      } catch (err: unknown) {
-        if (isRetryableError(err)) {
-          const delay = retryDelays[attempt];
-          await new Promise((resolve) => setTimeout(resolve, delay));
-          if (attempt === 2) {
-            throw err;
+    for (const modelName of models) {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction,
+        generationConfig,
+      });
+
+      let modelSuccess = false;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          result = await model.generateContent({
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  { text: prompt },
+                  { text: overrideCommand },
+                ],
+              },
+            ],
+            generationConfig,
+          });
+          modelSuccess = true;
+          break;
+        } catch (err: unknown) {
+          lastError = err;
+          if (isRetryableError(err)) {
+            const delay = retryDelays[attempt];
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          } else {
+            // Non-retryable error, stop retrying this model
+            break;
           }
-        } else {
-          throw err;
         }
       }
+
+      if (modelSuccess && result) {
+        break;
+      }
+
+      const errMessage = lastError instanceof Error ? lastError.message : String(lastError);
+      console.warn(`Warning: Model ${modelName} failed (${errMessage}). Falling back to next model...`);
     }
 
     if (!result) {
-      throw new Error('Failed to generate content from Gemini API.');
+      throw lastError || new Error('All Gemini models failed to generate content.');
     }
 
     const responseText = result.response.text();
