@@ -17,9 +17,6 @@ import {
   ShieldCheck,
   Plus,
   Loader2,
-  Code2,
-  Copy,
-  Check,
   Cpu,
   User,
   CreditCard,
@@ -114,7 +111,6 @@ export default function Home() {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [reportData, setReportData] = useState<BloodReportData | null>(null);
   const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
-  const [copied, setCopied] = useState<boolean>(false);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState<boolean>(false);
@@ -310,14 +306,6 @@ export default function Home() {
     }
   };
 
-  const copyToClipboard = () => {
-    if (extractedText) {
-      navigator.clipboard.writeText(extractedText);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
   const formatFileSize = (bytes: number): string => {
     if (bytes < 1024) return bytes + ' bytes';
     else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
@@ -464,40 +452,6 @@ export default function Home() {
             <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-3 rounded-lg">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
-            </div>
-          )}
-
-          {/* Extracted Raw Text Display */}
-          {extractedText !== null && (
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden shadow-lg space-y-0 text-slate-100">
-              <div className="bg-slate-800/80 px-4 py-3 flex items-center justify-between border-b border-slate-700">
-                <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
-                  <Code2 className="w-4 h-4" />
-                  <span>Extracted PDF Raw Text</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={copyToClipboard}
-                  className="inline-flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2.5 py-1 rounded transition-colors"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Copied</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Text</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <div className="p-4 max-h-64 overflow-y-auto font-mono text-xs text-slate-300 leading-relaxed whitespace-pre-wrap selection:bg-teal-700 selection:text-white">
-                {extractedText.trim().length > 0
-                  ? extractedText
-                  : '[No text content found in PDF document]'}
-              </div>
             </div>
           )}
         </section>
@@ -658,22 +612,6 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-
-              {/* JSON Structured Output View */}
-              <div className="bg-slate-900 text-slate-100 rounded-2xl border border-slate-800 p-5 shadow-md space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2 text-xs font-mono text-teal-400">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Structured Multi-Panel JSON Output</span>
-                  </div>
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
-                    Gemini Schema Output
-                  </span>
-                </div>
-                <pre className="font-mono text-xs text-teal-300 bg-slate-950 p-4 rounded-xl overflow-x-auto leading-relaxed border border-slate-800">
-                  {JSON.stringify(reportData, null, 2)}
-                </pre>
-              </div>
 
               {/* Additional Health Visualization & Insights Section */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
