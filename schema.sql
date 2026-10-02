@@ -15,3 +15,23 @@ CREATE TABLE IF NOT EXISTS lab_results (
   metrics JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Enable Row Level Security (RLS) on both tables
+ALTER TABLE patients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lab_results ENABLE ROW LEVEL SECURITY;
+
+-- Strict default deny policies for anon / public access
+-- Since all backend operations use service_role (which bypasses RLS), denying public/anon ensures client/public key cannot access medical data directly.
+CREATE POLICY "Deny public access to patients"
+  ON patients
+  FOR ALL
+  TO anon, authenticated
+  USING (false)
+  WITH CHECK (false);
+
+CREATE POLICY "Deny public access to lab_results"
+  ON lab_results
+  FOR ALL
+  TO anon, authenticated
+  USING (false)
+  WITH CHECK (false);
