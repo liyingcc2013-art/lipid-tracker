@@ -5,9 +5,21 @@
 ▲ Next.js 16.3.5 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
-✓ Ready in 526ms
-✓ Running next.config.ts took 42ms
+✓ Ready in 546ms
+✓ Running next.config.ts took 45ms
 
 ○ Compiling / ...
- HEAD / 200 in 4.8s (next.js: 4.4s, application-code: 396ms)
- GET / 200 in 74ms (next.js: 15ms, application-code: 59ms)
+ GET / 200 in 5.1s (next.js: 4.6s, application-code: 546ms)
+Supabase environment variables (NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY) are missing.
+ GET /api/get-latest-patient 200 in 2.2s (next.js: 1911ms, application-code: 281ms)
+Error querying latest lab result: {
+  message: 'TypeError: fetch failed',
+  details: 'TypeError: fetch failed\n' +
+    '\n' +
+    'Caused by: Error: getaddrinfo ENOTFOUND placeholder.supabase.co (ENOTFOUND)\n' +
+    'Error: getaddrinfo ENOTFOUND placeholder.supabase.co\n' +
+    '    at GetAddrInfoReqWrap.onlookupall [as oncomplete] (node:dns:122:26)\n' +
+    '    at GetAddrInfoReqWrap.callbackTrampoline (node:internal/async_hooks:130:17)',
+  hint: '',
+  code: ''
+}

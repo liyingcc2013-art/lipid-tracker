@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback, DragEvent, ChangeEvent } from 'react';
+import React, { useState, useRef, useCallback, useEffect, DragEvent, ChangeEvent } from 'react';
 import {
   UploadCloud,
   FileText,
@@ -118,8 +118,54 @@ export default function Home() {
 
   // Patient history state
   const [patientHistory, setPatientHistory] = useState<LabResultRecord[]>([]);
+  const [isLoadingInitial, setIsLoadingInitial] = useState<boolean>(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Initial load: Hydrate UI with the most recently uploaded patient data
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchLatestPatientData() {
+      setIsLoadingInitial(true);
+      try {
+        const res = await fetch('/api/get-latest-patient');
+        const json = await res.json();
+
+        if (!isMounted) return;
+
+        if (res.ok && json.patient && Array.isArray(json.lab_results) && json.lab_results.length > 0) {
+          setPatientHistory(json.lab_results);
+
+          const latestResult =
+            json.latest_lab_result || json.lab_results[json.lab_results.length - 1];
+
+          if (latestResult) {
+            setReportData({
+              patient_name: json.patient.name || '',
+              patient_ic: json.patient.nric || '',
+              patient_dob_or_age: json.patient.dob_or_age || '',
+              test_date: latestResult.test_date || '',
+              categories: Array.isArray(latestResult.metrics) ? latestResult.metrics : [],
+            });
+            setExtractionMethod('gemini');
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching latest patient data on initial load:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingInitial(false);
+        }
+      }
+    }
+
+    fetchLatestPatientData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const fetchHistory = useCallback(async (patientIc?: string, patientId?: string) => {
     if (!patientIc && !patientId) return;
@@ -389,6 +435,14 @@ export default function Home() {
             Upload your blood report PDF to parse patient metadata and multi-panel test metrics using Gemini AI.
           </p>
         </section>
+
+        {/* Initial Hydration Subtle Spinner */}
+        {isLoadingInitial && (
+          <div className="flex items-center justify-center gap-2 py-2.5 px-4 bg-slate-100/80 border border-slate-200/80 rounded-xl text-xs font-medium text-slate-600 max-w-2xl mx-auto shadow-2xs">
+            <Loader2 className="w-4 h-4 animate-spin text-teal-600 shrink-0" />
+            <span>Loading latest patient health records...</span>
+          </div>
+        )}
 
         {/* Upload Area */}
         <section className="max-w-2xl mx-auto space-y-4">
