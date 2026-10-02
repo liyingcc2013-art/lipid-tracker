@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
         : Array.isArray(body.extracted_data?.categories)
         ? body.extracted_data.categories
         : [],
+      file_path: body.file_path || body.extracted_data?.file_path || null,
     };
 
     if (!reportData.patient_ic && !reportData.test_date && reportData.categories.length === 0) {
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
           patient_id: patientId,
           test_date: formattedDate,
           metrics: reportData.categories,
+          file_path: reportData.file_path || null,
         })
         .select('id')
         .single();
