@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, DragEvent, ChangeEvent } from 'react';
+import React, { useState, useRef, useCallback, DragEvent, ChangeEvent } from 'react';
 import {
   UploadCloud,
   FileText,
@@ -8,12 +8,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Activity,
-  FileSearch,
-  LineChart,
   BarChart3,
   Calendar,
   Sparkles,
-  ArrowUpRight,
   ShieldCheck,
   Plus,
   Loader2,
@@ -22,8 +19,9 @@ import {
   CreditCard,
   FlaskConical,
   Layers,
-  FileCheck
+  FileCheck,
 } from 'lucide-react';
+import HealthTrendChart, { LabResultRecord } from './components/HealthTrendChart';
 
 interface UploadedFile {
   name: string;
@@ -82,7 +80,7 @@ function getTestBadge(testName: string, value: number, refRange: string) {
 
   // Range min - max (e.g., 10 - 50)
   if (refRange.includes('-')) {
-    const parts = refRange.split('-').map(p => parseFloat(p.replace(/[^0-9.]/g, '')));
+    const parts = refRange.split('-').map((p) => parseFloat(p.replace(/[^0-9.]/g, '')));
     if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
       if (value >= parts[0] && value <= parts[1]) {
         return { label: 'Normal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' };
@@ -95,7 +93,9 @@ function getTestBadge(testName: string, value: number, refRange: string) {
   }
 
   if (name.includes('hdl')) {
-    return value >= 1.0 ? { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' } : { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
+    return value >= 1.0
+      ? { label: 'Optimal', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' }
+      : { label: 'Low', color: 'bg-rose-50 text-rose-700 border-rose-200' };
   }
 
   return { label: 'Normal', color: 'bg-teal-50 text-teal-700 border-teal-200' };
@@ -107,7 +107,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
-  const [extractedText, setExtractedText] = useState<string | null>(null);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [reportData, setReportData] = useState<BloodReportData | null>(null);
   const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
@@ -117,7 +116,28 @@ export default function Home() {
   const [duplicateData, setDuplicateData] = useState<BloodReportData | null>(null);
   const [isForceSaving, setIsForceSaving] = useState<boolean>(false);
 
+  // Patient history state
+  const [patientHistory, setPatientHistory] = useState<LabResultRecord[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchHistory = useCallback(async (patientIc?: string, patientId?: string) => {
+    if (!patientIc && !patientId) return;
+
+    try {
+      const query = patientIc
+        ? `patient_ic=${encodeURIComponent(patientIc)}`
+        : `patient_id=${encodeURIComponent(patientId!)}`;
+      const res = await fetch(`/api/patient-history?${query}`);
+      const json = await res.json();
+
+      if (res.ok && json.lab_results) {
+        setPatientHistory(json.lab_results);
+      }
+    } catch (err) {
+      console.error('Error fetching patient history:', err);
+    }
+  }, []);
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -133,10 +153,10 @@ export default function Home() {
 
   const processPdfFile = async (selectedFile: File) => {
     setError(null);
-    setExtractedText(null);
     setNumPages(null);
     setReportData(null);
     setExtractionMethod(null);
+    setPatientHistory([]);
 
     if (selectedFile.type !== 'application/pdf' && !selectedFile.name.toLowerCase().endsWith('.pdf')) {
       setError('Please upload a valid PDF document containing your lab report.');
@@ -167,7 +187,6 @@ export default function Home() {
         throw new Error(data.error || 'Failed to process PDF file.');
       }
 
-      setExtractedText(data.text);
       setNumPages(data.numpages);
 
       // Trigger AI Extraction of structured blood report metrics & metadata
@@ -185,12 +204,17 @@ export default function Home() {
           const extractedObj: BloodReportData = {
             patient_name: extractJson.patient_name || extractJson.extracted_data?.patient_name || '',
             patient_ic: extractJson.patient_ic || extractJson.extracted_data?.patient_ic || '',
-            patient_dob_or_age: extractJson.patient_dob_or_age || extractJson.extracted_data?.patient_dob_or_age || '',
+            patient_dob_or_age:
+              extractJson.patient_dob_or_age || extractJson.extracted_data?.patient_dob_or_age || '',
             test_date: extractJson.test_date || extractJson.extracted_data?.test_date || '',
             categories: extractJson.categories || extractJson.extracted_data?.categories || [],
           };
           setDuplicateData(extractedObj);
           setShowDuplicateModal(true);
+
+          if (extractedObj.patient_ic) {
+            fetchHistory(extractedObj.patient_ic);
+          }
           return;
         }
 
@@ -198,14 +222,20 @@ export default function Home() {
           throw new Error(extractJson.error || 'Failed to extract report data.');
         }
 
-        setReportData({
+        const newReportData: BloodReportData = {
           patient_name: extractJson.patient_name || '',
           patient_ic: extractJson.patient_ic || '',
           patient_dob_or_age: extractJson.patient_dob_or_age || '',
           test_date: extractJson.test_date || '',
           categories: extractJson.categories || [],
-        });
+        };
+
+        setReportData(newReportData);
         setExtractionMethod(extractJson.extracted_by || 'gemini');
+
+        if (newReportData.patient_ic || extractJson.patient_id) {
+          fetchHistory(newReportData.patient_ic, extractJson.patient_id);
+        }
       } catch (extractErr) {
         console.error('Blood report data extraction error:', extractErr);
         const extractMsg =
@@ -243,10 +273,10 @@ export default function Home() {
 
   const removeFile = () => {
     setFile(null);
-    setExtractedText(null);
     setNumPages(null);
     setReportData(null);
     setExtractionMethod(null);
+    setPatientHistory([]);
     setError(null);
     setShowDuplicateModal(false);
     setDuplicateData(null);
@@ -273,16 +303,22 @@ export default function Home() {
         throw new Error(json.error || 'Failed to save duplicate record.');
       }
 
-      setReportData({
+      const savedReport: BloodReportData = {
         patient_name: json.patient_name || duplicateData.patient_name,
         patient_ic: json.patient_ic || duplicateData.patient_ic,
         patient_dob_or_age: json.patient_dob_or_age || duplicateData.patient_dob_or_age,
         test_date: json.test_date || duplicateData.test_date,
         categories: json.categories || duplicateData.categories,
-      });
+      };
+
+      setReportData(savedReport);
       setExtractionMethod('gemini');
       setShowDuplicateModal(false);
       setDuplicateData(null);
+
+      if (savedReport.patient_ic || json.patient_id) {
+        fetchHistory(savedReport.patient_ic, json.patient_id);
+      }
     } catch (err: unknown) {
       console.error('Error force saving duplicate:', err);
       const msg = err instanceof Error ? err.message : 'Error force saving record.';
@@ -297,10 +333,10 @@ export default function Home() {
     setShowDuplicateModal(false);
     setDuplicateData(null);
     setFile(null);
-    setExtractedText(null);
     setNumPages(null);
     setReportData(null);
     setExtractionMethod(null);
+    setPatientHistory([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -615,37 +651,14 @@ export default function Home() {
 
               {/* Additional Health Visualization & Insights Section */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Historical Trend Placeholder */}
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 p-6 space-y-4 shadow-2xs">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                        <LineChart className="w-4 h-4 text-teal-600" />
-                        Multi-Panel Health Trend
-                      </h4>
-                      <p className="text-xs text-slate-500">
-                        Comprehensive metric visualization across report dates
-                      </p>
-                    </div>
-                    <span className="text-xs text-teal-600 font-medium hover:underline cursor-pointer flex items-center gap-0.5">
-                      View Full Report <ArrowUpRight className="w-3.5 h-3.5" />
-                    </span>
-                  </div>
-
-                  <div className="h-56 rounded-xl bg-slate-50/70 border border-dashed border-slate-200 flex flex-col items-center justify-center relative overflow-hidden">
-                    <div className="relative z-10 text-center space-y-2 p-4">
-                      <div className="w-12 h-12 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center mx-auto shadow-2xs">
-                        <FileSearch className="w-6 h-6" />
-                      </div>
-                      <p className="text-sm font-semibold text-slate-700">
-                        Patient {reportData.patient_name || 'N/A'} ({reportData.patient_ic || 'N/A'})
-                      </p>
-                      <p className="text-xs text-slate-500 max-w-sm">
-                        Loaded {reportData.categories.length} category panel(s) ({totalTests} test item(s)) for test date{' '}
-                        {reportData.test_date || 'N/A'}.
-                      </p>
-                    </div>
-                  </div>
+                {/* Interactive Multi-Panel Health Trend Chart */}
+                <div className="lg:col-span-2">
+                  <HealthTrendChart
+                    patientName={reportData.patient_name}
+                    patientIc={reportData.patient_ic}
+                    labResults={patientHistory}
+                    onUploadClick={() => fileInputRef.current?.click()}
+                  />
                 </div>
 
                 {/* AI Insights Card */}
@@ -664,6 +677,14 @@ export default function Home() {
                           Extracted {totalTests} key metric(s) across {reportData.categories.length} panel(s).
                         </p>
                       </div>
+                      {patientHistory.length > 1 && (
+                        <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100 space-y-1">
+                          <p className="font-semibold text-emerald-900">Trend Line Generated</p>
+                          <p className="text-slate-600">
+                            {patientHistory.length} historical reports found. Interactive trends displayed across extracted test dates.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
 
