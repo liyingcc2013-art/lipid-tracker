@@ -136,6 +136,7 @@ export default function Home() {
       try {
         const res = await fetch('/api/get-latest-patient');
         const json = await res.json();
+        console.log('Raw response from /api/get-latest-patient:', json);
 
         if (!isMounted) return;
 
