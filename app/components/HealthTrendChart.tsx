@@ -19,6 +19,7 @@ export interface LabResultRecord {
   patient_id: string;
   test_date: string;
   metrics: CategoryPanel[];
+  file_path?: string | null;
   created_at?: string;
 }
 

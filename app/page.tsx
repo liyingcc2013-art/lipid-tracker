@@ -20,6 +20,8 @@ import {
   FlaskConical,
   Layers,
   FileCheck,
+  ExternalLink,
+  Download,
 } from 'lucide-react';
 import HealthTrendChart, { LabResultRecord } from './components/HealthTrendChart';
 
@@ -48,6 +50,7 @@ export interface BloodReportData {
   patient_dob_or_age: string;
   test_date: string;
   categories: CategoryPanel[];
+  file_path?: string | null;
 }
 
 function getTestBadge(testName: string, value: number, refRange: string) {
@@ -110,6 +113,8 @@ export default function Home() {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [reportData, setReportData] = useState<BloodReportData | null>(null);
   const [extractionMethod, setExtractionMethod] = useState<'gemini' | 'fallback' | null>(null);
+  const [isFetchingPdfUrl, setIsFetchingPdfUrl] = useState<boolean>(false);
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
 
   // Duplicate modal states
   const [showDuplicateModal, setShowDuplicateModal] = useState<boolean>(false);
@@ -141,12 +146,14 @@ export default function Home() {
             json.latest_lab_result || json.lab_results[json.lab_results.length - 1];
 
           if (latestResult) {
+            setSelectedResultId(latestResult.id);
             setReportData({
               patient_name: json.patient.name || '',
               patient_ic: json.patient.nric || '',
               patient_dob_or_age: json.patient.dob_or_age || '',
               test_date: latestResult.test_date || '',
               categories: Array.isArray(latestResult.metrics) ? latestResult.metrics : [],
+              file_path: latestResult.file_path || null,
             });
             setExtractionMethod('gemini');
           }
@@ -238,10 +245,13 @@ export default function Home() {
       // Trigger AI Extraction of structured blood report metrics & metadata
       setIsExtracting(true);
       try {
+        const extractFormData = new FormData();
+        extractFormData.append('text', data.text);
+        extractFormData.append('file', selectedFile);
+
         const extractRes = await fetch('/api/extract-lipid-data', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: data.text }),
+          body: extractFormData,
         });
 
         const extractJson = await extractRes.json();
@@ -254,6 +264,7 @@ export default function Home() {
               extractJson.patient_dob_or_age || extractJson.extracted_data?.patient_dob_or_age || '',
             test_date: extractJson.test_date || extractJson.extracted_data?.test_date || '',
             categories: extractJson.categories || extractJson.extracted_data?.categories || [],
+            file_path: extractJson.file_path || extractJson.extracted_data?.file_path || null,
           };
           setDuplicateData(extractedObj);
           setShowDuplicateModal(true);
@@ -274,8 +285,12 @@ export default function Home() {
           patient_dob_or_age: extractJson.patient_dob_or_age || '',
           test_date: extractJson.test_date || '',
           categories: extractJson.categories || [],
+          file_path: extractJson.file_path || null,
         };
 
+        if (extractJson.lab_result_id) {
+          setSelectedResultId(extractJson.lab_result_id);
+        }
         setReportData(newReportData);
         setExtractionMethod(extractJson.extracted_by || 'gemini');
 
@@ -322,6 +337,7 @@ export default function Home() {
     setNumPages(null);
     setReportData(null);
     setExtractionMethod(null);
+    setSelectedResultId(null);
     setPatientHistory([]);
     setError(null);
     setShowDuplicateModal(false);
@@ -329,6 +345,44 @@ export default function Home() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleViewOriginalPdf = async (filePathToUse?: string | null) => {
+    const filePath = filePathToUse || reportData?.file_path;
+    if (!filePath) {
+      setError('No original PDF file path found for this report.');
+      return;
+    }
+
+    setIsFetchingPdfUrl(true);
+    try {
+      const res = await fetch(`/api/get-pdf-url?filePath=${encodeURIComponent(filePath)}`);
+      const json = await res.json();
+
+      if (!res.ok || !json.signedUrl) {
+        throw new Error(json.error || 'Failed to generate signed URL for PDF viewing.');
+      }
+
+      window.open(json.signedUrl, '_blank', 'noopener,noreferrer');
+    } catch (err: unknown) {
+      console.error('Error viewing PDF:', err);
+      const msg = err instanceof Error ? err.message : 'Error fetching PDF view URL.';
+      setError(msg);
+    } finally {
+      setIsFetchingPdfUrl(false);
+    }
+  };
+
+  const handleSelectHistoricalResult = (record: LabResultRecord) => {
+    setSelectedResultId(record.id);
+    setReportData((prev) => ({
+      patient_name: prev?.patient_name || '',
+      patient_ic: prev?.patient_ic || '',
+      patient_dob_or_age: prev?.patient_dob_or_age || '',
+      test_date: record.test_date,
+      categories: Array.isArray(record.metrics) ? record.metrics : [],
+      file_path: record.file_path || null,
+    }));
   };
 
   const handleConfirmForceSave = async () => {
@@ -355,8 +409,12 @@ export default function Home() {
         patient_dob_or_age: json.patient_dob_or_age || duplicateData.patient_dob_or_age,
         test_date: json.test_date || duplicateData.test_date,
         categories: json.categories || duplicateData.categories,
+        file_path: json.file_path || duplicateData.file_path || null,
       };
 
+      if (json.lab_result_id) {
+        setSelectedResultId(json.lab_result_id);
+      }
       setReportData(savedReport);
       setExtractionMethod('gemini');
       setShowDuplicateModal(false);
@@ -566,6 +624,22 @@ export default function Home() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
+                  {reportData.file_path && (
+                    <button
+                      type="button"
+                      onClick={() => handleViewOriginalPdf()}
+                      disabled={isFetchingPdfUrl}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      {isFetchingPdfUrl ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <FileText className="w-3.5 h-3.5" />
+                      )}
+                      <span>View Original Report</span>
+                      <ExternalLink className="w-3 h-3 ml-0.5 opacity-80" />
+                    </button>
+                  )}
                   {extractionMethod && (
                     <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-full bg-teal-500/10 text-teal-300 border border-teal-500/30">
                       <Cpu className="w-3.5 h-3.5" />
@@ -578,6 +652,35 @@ export default function Home() {
                   </span>
                 </div>
               </div>
+
+              {/* TEST DATE SELECTOR BAR (IF MULTIPLE LAB RESULTS AVAILABLE) */}
+              {patientHistory.length > 0 && (
+                <div className="pt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-400 font-medium mr-1 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-teal-400" /> Test Date Record:
+                  </span>
+                  {patientHistory.map((record) => {
+                    const isSelected = selectedResultId === record.id || reportData.test_date === record.test_date;
+                    return (
+                      <button
+                        key={record.id}
+                        type="button"
+                        onClick={() => handleSelectHistoricalResult(record)}
+                        className={`px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-teal-500 text-slate-950 font-bold shadow-xs'
+                            : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700/80 hover:text-white'
+                        }`}
+                      >
+                        <span>{record.test_date || 'Unknown Date'}</span>
+                        {record.file_path && (
+                          <Download className="w-3 h-3 opacity-70" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
                 <div className="flex items-center gap-3 bg-slate-800/50 p-3.5 rounded-xl border border-slate-700/60">

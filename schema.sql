@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS lab_results (
   patient_id UUID REFERENCES patients(id) ON DELETE CASCADE,
   test_date DATE,
   metrics JSONB,
+  file_path TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

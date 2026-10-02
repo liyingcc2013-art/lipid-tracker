@@ -53,7 +53,7 @@ export async function GET() {
     // 3. Query ALL lab_results for that specific patient_id
     const { data: allLabResults, error: allLabErr } = await supabase
       .from('lab_results')
-      .select('id, patient_id, test_date, metrics, created_at')
+      .select('id, patient_id, test_date, metrics, file_path, created_at')
       .eq('patient_id', patientId)
       .order('test_date', { ascending: true });
 

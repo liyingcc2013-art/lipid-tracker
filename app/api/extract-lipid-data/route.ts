@@ -20,6 +20,7 @@ export interface BloodReportData {
   patient_dob_or_age: string;
   test_date: string;
   categories: CategoryPanel[];
+  file_path?: string | null;
 }
 
 export function sanitizeRawText(rawText: string): string {
@@ -106,8 +107,26 @@ export function formatDateForDb(dateStr: string): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const rawText: string = body.text || body.rawText || '';
+    let rawText = '';
+    let fileBuffer: Buffer | null = null;
+
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      rawText = String(formData.get('text') || formData.get('rawText') || '');
+      const file = formData.get('file');
+      if (file && file instanceof File) {
+        const arrayBuffer = await file.arrayBuffer();
+        fileBuffer = Buffer.from(arrayBuffer);
+      }
+    } else {
+      const body = await req.json();
+      rawText = String(body.text || body.rawText || '');
+      if (body.fileBase64) {
+        fileBuffer = Buffer.from(body.fileBase64, 'base64');
+      }
+    }
 
     if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
       return NextResponse.json(
@@ -329,6 +348,7 @@ ${sanitizedText}
     // --- SUPABASE PERSISTENCE ---
     let patientId: string | null = null;
     let labResultId: string | null = null;
+    let uploadedFilePath: string | null = null;
 
     if (reportData.patient_ic) {
       // 1. Check if patient exists or upsert patient
@@ -355,6 +375,23 @@ ${sanitizedText}
     if (patientId) {
       const formattedDate = formatDateForDb(reportData.test_date);
 
+      if (fileBuffer) {
+        const dateStr = formattedDate || 'unknown';
+        const storagePath = `${patientId}/${dateStr}_${Date.now()}.pdf`;
+        const { data: storageData, error: storageError } = await supabase.storage
+          .from('blood-reports')
+          .upload(storagePath, fileBuffer, {
+            contentType: 'application/pdf',
+            upsert: true,
+          });
+
+        if (storageError) {
+          console.error('Error uploading file to Supabase storage:', storageError);
+        } else {
+          uploadedFilePath = storageData?.path || storagePath;
+        }
+      }
+
       if (formattedDate) {
         const { data: existingRecords, error: existingError } = await supabase
           .from('lab_results')
@@ -370,7 +407,8 @@ ${sanitizedText}
               duplicate: true,
               message: `A blood test done on ${reportData.test_date} has been detected in the records.`,
               patient_id: patientId,
-              extracted_data: reportData,
+              file_path: uploadedFilePath,
+              extracted_data: { ...reportData, file_path: uploadedFilePath },
               ...reportData,
             },
             { status: 409 }
@@ -385,6 +423,7 @@ ${sanitizedText}
           patient_id: patientId,
           test_date: formattedDate,
           metrics: reportData.categories,
+          file_path: uploadedFilePath,
         })
         .select('id')
         .single();
@@ -401,6 +440,7 @@ ${sanitizedText}
       extracted_by: 'gemini',
       patient_id: patientId,
       lab_result_id: labResultId,
+      file_path: uploadedFilePath,
       ...reportData,
     });
   } catch (err: unknown) {
