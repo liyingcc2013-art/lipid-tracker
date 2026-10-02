@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom Teal Horizontal Scrollbar */
+.custom-teal-scrollbar::-webkit-scrollbar {
+  height: 5px;
+}
+.custom-teal-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9; /* slate-100 */
+  border-radius: 9999px;
+}
+.custom-teal-scrollbar::-webkit-scrollbar-thumb {
+  background: #0d9488; /* teal-600 */
+  border-radius: 9999px;
+}
+.custom-teal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #0f766e; /* teal-700 */
+}
