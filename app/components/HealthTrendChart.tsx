@@ -177,7 +177,7 @@ export default function HealthTrendChart({
 
         {/* Panel Tabs / Toggles */}
         {categories.length > 0 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          <div className="flex items-center gap-1.5 overflow-x-auto flex-nowrap max-w-full pb-2 pr-4 custom-teal-scrollbar">
             {categories.map((cat) => {
               const isActive = cat === currentCategory;
               return (
@@ -185,7 +185,7 @@ export default function HealthTrendChart({
                   key={cat}
                   type="button"
                   onClick={() => setActiveCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer shrink-0 ${
                     isActive
                       ? 'bg-teal-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900'
